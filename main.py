@@ -13,21 +13,23 @@ def squares_on_img(img, targets, w, h):
         cv2.rectangle(img, pt, (pt[0] + w, pt[1] + h), (0, 0, 255), 2)
 
 
-filename = 'test_images\\Pool_table_from_above.png'
-template_name = 'templates\\tt';
+filename = 'test_images/Pool_table_from_above.png'
+template_name = 'templates/tt';
 img = cv2.imread(filename)
 src_points = []
-dst_points = np.float32([(0,0), (512,0), (512,512), (0,512)])
+dst_points = np.float32([(0,0), (512,0), (512,512), (0,512)]).reshape(-1,1,2)
 for i in range(1, 5):
     template = cv2.imread(template_name + str(i) + '.png', 0)
     w, h = template.shape[::-1]
-    targets = find_image_targets(img, template, 0.7)
-    for pt in targets:
-        src_points.append(pt)
+    targets = find_image_targets(img, template, 0.65)
+    src_points.append(list(zip(*targets[::-1]))[0])
     squares_on_img(img, targets, w, h)
+src_points.append(src_points.pop(0))
+src_points.append(src_points.pop(0))
+src_points.append(src_points.pop(0))
+M, mask = cv2.findHomography(np.float32(src_points).reshape(-1,1,2), dst_points, cv2.RANSAC,5.0)
+im_dst = cv2.warpPerspective(img, M, (512, 512))
+cv2.imwrite("output/res2.png", im_dst)
 
-M, mask = cv2.findHomography(np.float32(src_points), dst_points, cv2.RANSAC, 5.0)
-matchesMask = mask.ravel.tolist()
 
-dst = cv2.perspectiveTransform()
-cv2.imwrite('output\\res.png', img)
+cv2.imwrite('output/res.png', img)
