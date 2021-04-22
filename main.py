@@ -5,12 +5,10 @@ import cv2
 import cv2 as cv
 import numpy as np
 
-
 def find_image_targets(img, target, threshold=0.8):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     res = cv2.matchTemplate(gray, target, cv2.TM_CCOEFF_NORMED)
     return np.where(res >= threshold)
-
 
 def squares_on_img(img, targets, w, h):
     for pt in zip(*targets[::-1]):
@@ -48,7 +46,7 @@ def find_boxes_from_img(img,output):
             cv2.fillPoly(thresh_gray, pts=[cont], color=0)
             continue
     #cv.imshow('output/sovs.png', thresh_gray)
-    thresh_gray = cv2.morphologyEx(thresh_gray, cv.MORPH_CLOSE, cv.getStructuringElement(cv.MORPH_ELLIPSE, (5, 5)))
+    thresh_gray = cv2.morphologyEx(thresh_gray, cv.MORPH_CLOSE, cv.getStructuringElement(cv.MORPH_ELLIPSE, (5,5)))
     #cv.imshow('output/sovs.png', thresh_gray)
     contours, hier = cv.findContours(thresh_gray, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE)
 
@@ -62,9 +60,8 @@ def find_boxes_from_img(img,output):
         box = cv.boxPoints(rect)
         box = np.int0(box)
         cv.drawContours(output, [box], 0, (0, 255, 0), 1)
-
-    cv.imshow('output/sovs.png', output)
-
+    backtorgb = cv2.cvtColor(thresh_gray, cv2.COLOR_GRAY2RGB)
+    cv.imshow('output/sovs.png', np.hstack([backtorgb, output]))
 
 filename = 'test_images/mt.mp4'
 filename2 = 'test_images/mtc.png'
