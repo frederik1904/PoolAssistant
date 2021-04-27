@@ -1,19 +1,30 @@
 import pickle
 import threading
-
+import tkinter as tk
 import cv2
 import cv2 as cv
 import numpy as np
 import time as t
-
+top = tk.Tk()
 fps = 0
 fps_avg = 0
 fps_acc = 0
 start_t = t.perf_counter()
 time = t.perf_counter()
 debug = True
+reset_first_img = False
 frame_to_show = 0
+finished = False
+morph_size = 5
+morph_size_var = tk.StringVar()
+morph_size_var.set(str(morph_size))
 
+threshold_area = 500
+threshold_area_max = 5000
+threshold_area_var = tk.StringVar()
+threshold_area_max_var = tk.StringVar()
+threshold_area_var.set(str(threshold_area))
+threshold_area_max_var.set(str(threshold_area_max))
 
 def find_image_targets(img, target, threshold=0.8):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -40,8 +51,6 @@ def find_diff(img1, img2):
 
 
 def find_boxes_from_img(img, output):
-    threshold_area = 500
-    threshold_area_max = 5000
     ret, thresh_gray = cv.threshold(cv.cvtColor(img, cv.COLOR_BGR2GRAY), 15, 255, cv.THRESH_BINARY)
     contours, hier = cv.findContours(thresh_gray, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
 
@@ -59,7 +68,7 @@ def find_boxes_from_img(img, output):
             cv2.fillPoly(thresh_gray, pts=[cont], color=0)
             continue
 
-    thresh_gray2 = cv2.morphologyEx(thresh_gray, cv.MORPH_CLOSE, cv.getStructuringElement(cv.MORPH_ELLIPSE, (5, 5)))
+    thresh_gray2 = cv2.morphologyEx(thresh_gray, cv.MORPH_CLOSE, cv.getStructuringElement(cv.MORPH_ELLIPSE, (morph_size, morph_size)))
     contours, hier = cv.findContours(thresh_gray, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE)
     max_val, max_x, max_y = 0, 0, 0
     contour_cords = []
@@ -139,29 +148,70 @@ def test(a):
     pik = pickle.load(open("undist_params.p", "rb"))
     mtx = pik["mtx"]
     dist = pik["dist"]
-    global fps, fps_acc, fps_avg, time, frame_to_show
+    global fps, fps_acc, fps_avg, time, frame_to_show, reset_first_img, finished
 
     cap = cv2.VideoCapture("test_images/tm.mov")
     ret, frame = cap.read()
     img2 = frame
-    ret, frame = cap.read()
     frame_to_show = frame
     img2 = cv2.undistort(img2, mtx, dist, None, mtx)
     while ret:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        frame = cv2.undistort(frame, mtx, dist, None, mtx)
+
+        if reset_first_img:
+            img2 = frame
+            reset_first_img = False
+            continue
+
         diff_img = find_diff(frame, img2)
         frame_to_show = find_boxes_from_img(diff_img, frame)
-        ret, frame = cap.read()
-        if ret:
-            frame = cv2.undistort(frame, mtx, dist, None, mtx)
-            fps = int(1 / float((t.perf_counter() - time)))
-            fps_acc += 1
-            fps_avg = int(fps_acc / (t.perf_counter() - start_t))
-            time = t.perf_counter()
+        fps = int(1 / float((t.perf_counter() - time)))
+        fps_acc += 1
+        fps_avg = int(fps_acc / (t.perf_counter() - start_t))
+        time = t.perf_counter()
+    finished = True
 
 
 threading.Thread(target=lambda a: test(a), args=(["Test"])).start()
 
-while True:
+
+def change_debug_mode():
+    global debug, fps_avg, fps_acc, time
+    debug = not debug
+    fps_acc = fps_avg = fps
+    time = t.perf_counter()
+
+def reset_first_img_func():
+    global reset_first_img
+    reset_first_img = True
+
+
+def submit():
+    global morph_size, morph_size_var, threshold_area_var, threshold_area, threshold_area_max_var, threshold_area_max
+    morph_size = int(morph_size_var.get())
+    threshold_area = int(threshold_area_var.get())
+    threshold_area_max = int(threshold_area_max_var.get())
+
+def create_entry(text, variable, row):
+    label = tk.Label(top, text=text)
+    entry = tk.Entry(top, textvariable=variable, font=('calibre', 10, 'normal'))
+    label.grid(row=row, column=0)
+    entry.grid(row=row, column=1)
+
+debug_button = tk.Button(text="DEBUG MODE", command=change_debug_mode)
+debug_button.grid(row=0, column=0)
+reset_first_img_button = tk.Button(text="RESET DIFF IMAGE", command=reset_first_img_func)
+reset_first_img_button.grid(row=0, column=1)
+submit_button = tk.Button(text="Submit entries", command=submit)
+submit_button.grid(row=0, column=2)
+
+create_entry("Morph size: ", morph_size_var, 1)
+create_entry("threshold min", threshold_area_var, 2)
+create_entry("threshold_max", threshold_area_max_var, 3)
+while not finished:
     cv2.waitKey(1)
     cv.imshow('Window_Show', frame_to_show)
-t.sleep(100)
+    top.update()
