@@ -1,4 +1,6 @@
 import pickle
+import threading
+
 import cv2
 import cv2 as cv
 import numpy as np
@@ -10,6 +12,8 @@ fps_acc = 0
 start_t = t.perf_counter()
 time = t.perf_counter()
 debug = True
+frame_to_show = 0
+
 
 def find_image_targets(img, target, threshold=0.8):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -95,9 +99,9 @@ def find_boxes_from_img(img, output):
     if debug:
         backtorgb1 = cv2.cvtColor(thresh_gray, cv2.COLOR_GRAY2RGB)
         backtorgb = cv2.cvtColor(thresh_gray2, cv2.COLOR_GRAY2RGB)
-        cv.imshow('Window_Show', np.vstack([np.hstack([img, backtorgb1]), np.hstack([backtorgb, output])]))
+        return np.vstack([np.hstack([img, backtorgb1]), np.hstack([backtorgb, output])])
     else:
-        cv.imshow('Window_Show', output)
+        return output
 
 
 def create_homography_and_wrap(img, src_points, dest_points, height, width):
@@ -122,31 +126,42 @@ def create_homography_and_wrap(img, src_points, dest_points, height, width):
             circle_points.append((px, py, r))
     return circle_points
 
+
 def find_avg_color(frame, contour):
     mask = np.zeros(frame.shape[:2], np.uint8)
     cv.drawContours(mask, contour, -1, 255, -1)
     mean = cv.mean(frame, mask=mask)
     return (mean[0] + mean[1] + mean[2]) / 3
 
-# Load calib values
-pik = pickle.load(open("undist_params.p", "rb"))
-mtx = pik["mtx"]
-dist = pik["dist"]
 
-cap = cv2.VideoCapture("test_images/tm.mov")
-ret, frame = cap.read()
-img2 = frame
-ret, frame = cap.read()
-img2 = cv2.undistort(img2, mtx, dist, None, mtx)
-while ret:
-    cv2.waitKey(1)
-    cv.imshow("TEST", img2)
-    diff_img = find_diff(frame, img2)
-    find_boxes_from_img(diff_img, frame)
+def test(a):
+    # Load calib values
+    pik = pickle.load(open("undist_params.p", "rb"))
+    mtx = pik["mtx"]
+    dist = pik["dist"]
+    global fps, fps_acc, fps_avg, time, frame_to_show
+
+    cap = cv2.VideoCapture("test_images/tm.mov")
     ret, frame = cap.read()
-    if ret:
-        frame = cv2.undistort(frame, mtx, dist, None, mtx)
-        fps = int(1 / float((t.perf_counter() - time)))
-        fps_acc += 1
-        fps_avg = int(fps_acc / (t.perf_counter() - start_t))
-        time = t.perf_counter()
+    img2 = frame
+    ret, frame = cap.read()
+    frame_to_show = frame
+    img2 = cv2.undistort(img2, mtx, dist, None, mtx)
+    while ret:
+        diff_img = find_diff(frame, img2)
+        frame_to_show = find_boxes_from_img(diff_img, frame)
+        ret, frame = cap.read()
+        if ret:
+            frame = cv2.undistort(frame, mtx, dist, None, mtx)
+            fps = int(1 / float((t.perf_counter() - time)))
+            fps_acc += 1
+            fps_avg = int(fps_acc / (t.perf_counter() - start_t))
+            time = t.perf_counter()
+
+
+threading.Thread(target=lambda a: test(a), args=(["Test"])).start()
+
+while True:
+    cv2.waitKey(1)
+    cv.imshow('Window_Show', frame_to_show)
+t.sleep(100)
