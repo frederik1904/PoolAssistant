@@ -1,18 +1,15 @@
-import math
 import pickle
-
 import cv2
 import cv2 as cv
 import numpy as np
 import time as t
-from PIL import Image
 
 fps = 0
 fps_avg = 0
 fps_acc = 0
 start_t = t.perf_counter()
 time = t.perf_counter()
-
+debug = True
 
 def find_image_targets(img, target, threshold=0.8):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -60,7 +57,8 @@ def find_boxes_from_img(img, output):
 
     thresh_gray2 = cv2.morphologyEx(thresh_gray, cv.MORPH_CLOSE, cv.getStructuringElement(cv.MORPH_ELLIPSE, (5, 5)))
     contours, hier = cv.findContours(thresh_gray, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE)
-
+    max_val, max_x, max_y = 0, 0, 0
+    contour_cords = []
     for cont in contours:
         area = cv.contourArea(cont)
         if area < 750 or area > threshold_area_max:
@@ -84,15 +82,22 @@ def find_boxes_from_img(img, output):
         #             int(w)
         #     ):
         #         output = cv2.circle(output, (cord[0], cord[1]), cord[2], (0, 0, 255), 4)
+        contour_cords.append(cont)
+        val = find_avg_color(output, cont)
+        if max_val < val:
+            max_val, max_x, max_y = val, int(x), int(y)
+    if max_val > 0:
+        output = cv.circle(output, (max_x, max_y), 40, (255, 255, 255), 7)
+
     output = cv.putText(output, "FPS: " + str(fps) + ", AVG: " + str(fps_avg), (0, 500), cv2.FONT_HERSHEY_SIMPLEX, 3,
                         (255, 255, 255))
 
-    #backtorgb1 = cv2.cvtColor(thresh_gray, cv2.COLOR_GRAY2RGB)
-    #backtorgb = cv2.cvtColor(thresh_gray2, cv2.COLOR_GRAY2RGB)
-    ### SLOW IMG SHOW FOR DEBUGGING :D
-    #cv.imshow('output/sovs.png', np.vstack([np.hstack([img, backtorgb1]), np.hstack([backtorgb, output])]))
-    ### FAST IMG SHOW FOR SHOWING OFF :P
-    cv.imshow('output/sovs.png', output)
+    if debug:
+        backtorgb1 = cv2.cvtColor(thresh_gray, cv2.COLOR_GRAY2RGB)
+        backtorgb = cv2.cvtColor(thresh_gray2, cv2.COLOR_GRAY2RGB)
+        cv.imshow('Window_Show', np.vstack([np.hstack([img, backtorgb1]), np.hstack([backtorgb, output])]))
+    else:
+        cv.imshow('Window_Show', output)
 
 
 def create_homography_and_wrap(img, src_points, dest_points, height, width):
@@ -117,54 +122,31 @@ def create_homography_and_wrap(img, src_points, dest_points, height, width):
             circle_points.append((px, py, r))
     return circle_points
 
-
-# filename = 'test_images/mt.mp4'
-# filename2 = 'test_images/mtc.png'
-# template_name = 'templates/tt'
-# img = cv2.imread(filename)
-# img2 = cv2.imread(filename2)
-# img2 = img2[99:632, 119:1152]
-# src_points = []
-# width, height = (1024, 512)
-# dst_points = np.float32([(0,0), (width,0), (width,height), (0,height)]).reshape(-1,1,2)
-# for i in range(1, 5):
-#    template = cv2.imread(template_name + str(i) + '.png', 0)
-#    w, h = template.shape[::-1]
-#    targets = find_image_targets(img, template, 0.65)
-#    src_points.append(list(zip(*targets[::-1]))[0])
-#    squares_on_img(img, targets, w, h)
-# src_points.append(src_points.pop(0))
-# src_points.append(src_points.pop(0))
-# src_points.append(src_points.pop(0))
-# M, mask = cv2.findHomography(np.float32(src_points).reshape(-1,1,2), dst_points, cv2.RANSAC,5.0)
-# im_dst = cv2.warpPerspective(img, M, (width, height))
+def find_avg_color(frame, contour):
+    mask = np.zeros(frame.shape[:2], np.uint8)
+    cv.drawContours(mask, contour, -1, 255, -1)
+    mean = cv.mean(frame, mask=mask)
+    return (mean[0] + mean[1] + mean[2]) / 3
 
 # Load calib values
 pik = pickle.load(open("undist_params.p", "rb"))
 mtx = pik["mtx"]
 dist = pik["dist"]
 
-cap = cv2.VideoCapture(1)
+cap = cv2.VideoCapture("test_images/tm.mov")
 ret, frame = cap.read()
 img2 = frame
+ret, frame = cap.read()
 img2 = cv2.undistort(img2, mtx, dist, None, mtx)
-
 while ret:
-    # cv2.imshow("sovs", frame)
     cv2.waitKey(1)
+    cv.imshow("TEST", img2)
     diff_img = find_diff(frame, img2)
-    # frame = cv.putText(frame, "FPS: " + str(fps), (0,500), cv2.FONT_HERSHEY_SIMPLEX, 3, (255, 255, 255))
-    # cv2.imshow("sovs", frame)
     find_boxes_from_img(diff_img, frame)
     ret, frame = cap.read()
-    frame = cv2.undistort(frame, mtx, dist, None, mtx)
-
-    fps = int(1 / float((t.perf_counter() - time)))
-    fps_acc += 1
-    fps_avg = int(fps_acc / (t.perf_counter() - start_t))
-
-    time = t.perf_counter()
-
-# cv2.imwrite('output/res3.png', diff_img)
-# cv2.imwrite("output/res2.png", im_dst)
-# cv2.imwrite('output/res.png', img)
+    if ret:
+        frame = cv2.undistort(frame, mtx, dist, None, mtx)
+        fps = int(1 / float((t.perf_counter() - time)))
+        fps_acc += 1
+        fps_avg = int(fps_acc / (t.perf_counter() - start_t))
+        time = t.perf_counter()
