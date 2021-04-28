@@ -18,3 +18,30 @@
 # src_points.append(src_points.pop(0))
 # M, mask = cv2.findHomography(np.float32(src_points).reshape(-1,1,2), dst_points, cv2.RANSAC,5.0)
 # im_dst = cv2.warpPerspective(img, M, (width, height))
+
+
+        for (markerCorner, markerID) in zip(corners, ids):
+            corners = markerCorner.reshape((4, 2))
+            (topLeft, topRight, bottomRight, bottomLeft) = corners
+            topRight = (int(topRight[0]), int(topRight[1]))
+            bottomRight = (int(bottomRight[0]), int(bottomRight[1]))
+            bottomLeft = (int(bottomLeft[0]), int(bottomLeft[1]))
+            topLeft = (int(topLeft[0]), int(topLeft[1]))
+            cv2.line(frame, topLeft, topRight, (0, 255, 0), 2)
+            cv2.line(frame, topRight, bottomRight, (0, 255, 0), 2)
+            cv2.line(frame, bottomRight, bottomLeft, (0, 255, 0), 2)
+            cv2.line(frame, bottomLeft, topLeft, (0, 255, 0), 2)
+
+
+# else:
+        #     dst_points = [(0, 0), (0, int(h)), (int(w), int(h)), (int(w), 0)]
+        #     src_points = [(x - int(w), y - int(h)), (x - int(w), y + int(h)), (x + int(w), y + int(h)),
+        #                   (x + int(w), y - int(h))]
+        #     for cord in create_homography_and_wrap(
+        #             cv.cvtColor(thresh_gray, cv.COLOR_GRAY2RGB),
+        #             np.float32(src_points).reshape(-1, 1, 2),
+        #             np.float32(dst_points).reshape(-1, 1, 2),
+        #             int(h),
+        #             int(w)
+        #     ):
+        #         output = cv2.circle(output, (cord[0], cord[1]), cord[2], (0, 0, 255), 4)
