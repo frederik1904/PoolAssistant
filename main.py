@@ -170,17 +170,14 @@ def test(a):
                 corners = markerCorner.reshape((4, 2))
                 (topLeft, topRight, bottomRight, bottomLeft) = corners
                 c = topLeft
-                tx, ty = topLeft[0], topLeft[1]
-                if tx > w / 2:
-                    if ty > h / 2:
-                        c = bottomLeft
-                    else:
-                        c = topLeft
-                else:
-                    if ty > h / 2:
-                        c = bottomLeft
-                    else:
-                        c = bottomLeft
+                if id[0] == 1:
+                    c = bottomLeft
+                elif id[0] == 69:
+                    c = topLeft
+                elif id[0] == 420:
+                    c = topRight
+                elif id[0] == 666:
+                    c = topLeft
                 cornerDict[str(id)] = (c, id)
                 src_points.append([c, id])
 
