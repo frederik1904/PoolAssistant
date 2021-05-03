@@ -164,7 +164,6 @@ def test(a):
     w, h = 1920, 1080
     while len(src_points) < 4:
         ret, frame = cap.read()
-        frame = cv2.undistort(frame, mtx, dist, None, mtx)
         (corners, ids, rejected) = cv2.aruco.detectMarkers(frame, arucoDict, parameters=arucoParams)
         for (markerCorner, id) in zip(corners, ids):
             if str(id) not in cornerDict:
@@ -193,14 +192,12 @@ def test(a):
     ret, frame = cap.read()
     img2 = frame
     frame_to_show = frame
-    img2 = cv2.undistort(img2, mtx, dist, None, mtx)
     img2 = cv2.warpPerspective(img2, M, (width, height))
     lastOutput = black_canvas = np.zeros((height, width, 3), np.uint8)
     while ret:
         ret, frame = cap.read()
         if not ret:
             break
-        frame = cv2.undistort(frame, mtx, dist, None, mtx)
         dst_points = np.float32([(0 + offset_x_l, 0 + offset_y_l), (width + offset_x_h, 0 + offset_y_l),
                                  (width + offset_x_h, height + offset_y_h),
                                  (0 + offset_x_l, height + offset_y_h)]).reshape(-1, 1, 2)
@@ -210,7 +207,6 @@ def test(a):
             frame_to_show = np.zeros((height, width, 3), np.uint8)
             t.sleep(1)
             ret, frame = cap.read()
-            frame = cv2.undistort(frame, mtx, dist, None, mtx)
             dst_points = np.float32([(0 + offset_x_l, 0 + offset_y_l), (width + offset_x_h, 0 + offset_y_l),
                                      (width + offset_x_h, height + offset_y_h),
                                      (0 + offset_x_l, height + offset_y_h)]).reshape(-1, 1, 2)
