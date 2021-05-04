@@ -1,4 +1,3 @@
-import pickle
 import threading
 import tkinter as tk
 import cv2
@@ -7,7 +6,6 @@ import numpy as np
 import time as t
 
 top = tk.Tk()
-pik = pickle.load(open("undist_params.p", "rb"))
 fps = 0
 fps_avg = 0
 fps_acc = 0
@@ -29,7 +27,7 @@ threshold_area_var = tk.StringVar()
 threshold_area_max_var = tk.StringVar()
 threshold_area_var.set(str(threshold_area))
 threshold_area_max_var.set(str(threshold_area_max))
-
+width, height = 1024, 512
 offset_x_h = -30
 offset_x_h_var = tk.StringVar()
 offset_x_h_var.set(str(offset_x_h))
@@ -42,6 +40,20 @@ offset_y_h_var.set(str(offset_y_h))
 offset_y_l = -8
 offset_y_l_var = tk.StringVar()
 offset_y_l_var.set(str(offset_y_l))
+
+threshold = 15
+threshold_var = tk.StringVar()
+threshold_var.set(str(threshold))
+
+arucoDict = cv2.aruco.Dictionary_get(cv2.aruco.DICT_6X6_1000)
+arucoParams = cv2.aruco.DetectorParameters_create()
+
+
+def get_aruco(marker_id, size):
+    new_image = np.zeros((size, size, 1), np.uint8)
+    cv2.aruco.drawMarker(arucoDict, marker_id, size, new_image, 1)
+    new_image = cv2.cvtColor(new_image, cv.COLOR_GRAY2RGB)
+    return new_image
 
 
 def find_image_targets(img, target, threshold=0.8):
@@ -61,17 +73,13 @@ def circle_on_img(img, x, y, r):
 
 def find_diff(img1, img2):
     diff = cv2.absdiff(img1, img2)
-    # conv_hsv_gray = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
-    # ret, mask = cv2.threshold(conv_hsv_gray, 50, 255, cv2.THRESH_BINARY_INV)
-    # diff[mask != 255] = [255, 255, 255]
-    # cv.imshow('output/sovs.png', mask)
     return diff
 
 
 def find_boxes_from_img(img, output, w, h, last_out):
     global debug_frame, debug
-    ret, thresh_gray = cv.threshold(cv.cvtColor(img, cv.COLOR_BGR2GRAY), 15, 255, cv.THRESH_BINARY)
-    #thresh_gray = thresh_gray - cv.cvtColor(last_out, cv.COLOR_BGR2GRAY)
+    ret, thresh_gray = cv.threshold(cv.cvtColor(img, cv.COLOR_BGR2GRAY), threshold, 255, cv.THRESH_BINARY)
+    # thresh_gray = thresh_gray - cv.cvtColor(last_out, cv.COLOR_BGR2GRAY)
     contours, hier = cv.findContours(thresh_gray, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
     black_canvas = np.zeros((h, w, 3), np.uint8)
     for cont in contours:
@@ -84,7 +92,7 @@ def find_boxes_from_img(img, output, w, h, last_out):
         rect = cv.minAreaRect(cont)
         (x, y), (w, h), angle = rect
         aspect_ratio = max(w, h) / min(w, h)
-        if (aspect_ratio > 2.5):  # or w > 100 or h > 100:
+        if aspect_ratio > 2.5:  # or w > 100 or h > 100:
             cv2.fillPoly(thresh_gray, pts=[cont], color=0)
             continue
 
@@ -99,7 +107,7 @@ def find_boxes_from_img(img, output, w, h, last_out):
             continue
         rect = cv.minAreaRect(cont)
         (x, y), (w, h), _ = rect
-        #black_canvas = cv.circle(black_canvas, (int(x), int(y)), 25, (255, 255, 255), 5)
+        # black_canvas = cv.circle(black_canvas, (int(x), int(y)), 25, (255, 255, 255), 5)
         contour_cords.append(cont)
     pos, radius = find_avg_color(output, thresh_gray2)
     black_canvas = cv.circle(black_canvas, pos, radius + 15, (255, 255, 255), 5)
@@ -149,43 +157,16 @@ def find_avg_color(frame, diff):
 
 def test(a):
     # Load calib values
-    global fps, fps_acc, fps_avg, time, frame_to_show, reset_first_img, finished, pik, debug
-    mtx = pik["mtx"]
-    dist = pik["dist"]
-    arucoDict = cv2.aruco.Dictionary_get(cv2.aruco.DICT_6X6_1000)
-    arucoParams = cv2.aruco.DetectorParameters_create()
+    global fps, fps_acc, fps_avg, time, frame_to_show, reset_first_img, finished, pik, debug, width, height
 
     src_points = []
     width, height = (1024 + offset_x_l + offset_x_h, 512 + offset_y_l + offset_y_h)
-    dst_points = np.float32([(0, 0), (width, 0), (width, height), (0, height)]).reshape(-1, 1, 2)
-
     cap = cv2.VideoCapture(1)
-    cornerDict = {}
-    w, h = 1920, 1080
-    while len(src_points) < 4:
-        ret, frame = cap.read()
-        (corners, ids, rejected) = cv2.aruco.detectMarkers(frame, arucoDict, parameters=arucoParams)
-        for (markerCorner, id) in zip(corners, ids):
-            if str(id) not in cornerDict:
-                corners = markerCorner.reshape((4, 2))
-                (topLeft, topRight, bottomRight, bottomLeft) = corners
-                c = topLeft
-                if id[0] == 1:
-                    c = bottomLeft
-                elif id[0] == 69:
-                    c = topLeft
-                elif id[0] == 420:
-                    c = topRight
-                elif id[0] == 666:
-                    c = topLeft
-                cornerDict[str(id)] = (c, id)
-                src_points.append([c, id])
-
-    src_points.sort(key=lambda x: x[1])
-    src_points = [item[0] for item in src_points]
+    src_points = calibrate_board_corners(cap)
     print("Found corners")
     dst_points = np.float32([(0, 0), (width, 0), (width, height), (0, height)]).reshape(-1, 1, 2)
     M, mask = cv2.findHomography(np.float32(src_points).reshape(-1, 1, 2), dst_points, cv2.RANSAC, 5.0)
+    calibrate_projector(cap, M)
     ret, frame = cap.read()
     img2 = frame
     frame_to_show = frame
@@ -195,9 +176,12 @@ def test(a):
         ret, frame = cap.read()
         if not ret:
             break
-        dst_points = np.float32([(0 + offset_x_l, 0 + offset_y_l), (width + offset_x_h, 0 + offset_y_l),
+        dst_points = np.float32([(0 + offset_x_l, 0 + offset_y_l),
+                                 (width + offset_x_h, 0 + offset_y_l),
                                  (width + offset_x_h, height + offset_y_h),
-                                 (0 + offset_x_l, height + offset_y_h)]).reshape(-1, 1, 2)
+                                 (0 + offset_x_l, height + offset_y_h)]
+                                ).reshape(-1, 1, 2)
+
         M, mask = cv2.findHomography(np.float32(src_points).reshape(-1, 1, 2), dst_points, cv2.RANSAC, 5.0)
         frame = cv2.warpPerspective(frame, M, (width, height))
         if reset_first_img:
@@ -224,6 +208,95 @@ def test(a):
     finished = True
 
 
+def insert_marker_on_img(marker, img, cord, size):
+    img[cord[0]:cord[0] + size, cord[1]:cord[1] + size] = marker
+    return img
+
+
+def calibrate_projector(cap, homography_m):
+    global height, width, frame_to_show, debug_frame
+    size = 100
+    initial_offset = 100
+    buffer = 5
+    ids_to_find = [2, 3, 4, 5]
+    aruco_images = [get_aruco(marker_id, size) for marker_id in ids_to_find]
+
+    cornerDict = {}
+    src_points = []
+    center = (height // 2, width // 2)
+    marker_2 = (center[0] - size - buffer, center[1] - size - buffer)  # Top Left
+    marker_3 = (center[0] - size - buffer, center[1] + buffer)  # Top Right
+    marker_4 = (center[0] + buffer, center[1] + buffer)  # Bottom Right
+    marker_5 = (center[0] + buffer, center[1] - size - buffer)  # Bottom Left
+    markers = [(marker_2, -initial_offset, -1), (marker_3, initial_offset, -1), (marker_4, initial_offset, 1), (marker_5, -initial_offset, 1)]
+    while len(src_points) < 4:
+        img_to_show = np.zeros((height, width, 3), np.uint8)
+        img_to_show[:, :] = (255, 255, 255)  # make image white
+        for index in range(len(markers)):
+            img_to_show = insert_marker_on_img(aruco_images[index], img_to_show, markers[index], size)
+        frame_to_show = img_to_show
+
+        ret, frame = cap.read()
+        frame = cv.warpPerspective(frame, homography_m, (width, height))
+        debug_frame = frame
+        (corners, ids, rejected) = cv2.aruco.detectMarkers(frame, arucoDict, parameters=arucoParams)
+
+        for marker_id in ids_to_find:
+            if marker_id in ids:
+                marker_t = markers[marker_id - 2]
+                if marker_t[1] != 0:
+                    marker_t[0][0] += marker_t[1]
+                elif marker_t[2] != 0:
+                    pass
+            else:
+
+
+        # for (markerCorner, id) in zip(corners, ids):
+        #     if str(id) not in cornerDict:
+        #         corners = markerCorner.reshape((4, 2))
+        #         (topLeft, topRight, bottomRight, bottomLeft) = corners
+        #         c = topLeft
+        #         if id[0] == 1:
+        #             c = bottomLeft
+        #         elif id[0] == 69:
+        #             c = topLeft
+        #         elif id[0] == 420:
+        #             c = topRight
+        #         elif id[0] == 666:
+        #             c = topLeft
+        #         cornerDict[str(id)] = (c, id)
+        #         src_points.append([c, id])
+    src_points.sort(key=lambda x: x[1])
+    src_points = [item[0] for item in src_points]
+    return src_points
+
+
+def calibrate_board_corners(cap):
+    cornerDict = {}
+    src_points = []
+    while len(src_points) < 4:
+        ret, frame = cap.read()
+        (corners, ids, rejected) = cv2.aruco.detectMarkers(frame, arucoDict, parameters=arucoParams)
+        for (markerCorner, id) in zip(corners, ids):
+            if str(id) not in cornerDict:
+                corners = markerCorner.reshape((4, 2))
+                (topLeft, topRight, bottomRight, bottomLeft) = corners
+                c = topLeft
+                if id[0] == 1:
+                    c = bottomLeft
+                elif id[0] == 69:
+                    c = topLeft
+                elif id[0] == 420:
+                    c = topRight
+                elif id[0] == 666:
+                    c = topLeft
+                cornerDict[str(id)] = (c, id)
+                src_points.append([c, id])
+    src_points.sort(key=lambda x: x[1])
+    src_points = [item[0] for item in src_points]
+    return src_points
+
+
 threading.Thread(target=lambda a: test(a), args=(["Test"])).start()
 
 
@@ -238,6 +311,7 @@ def reset_first_img_func():
     global reset_first_img
     reset_first_img = True
 
+
 def fullscreen_func():
     global fullscreen
     fullscreen = not fullscreen
@@ -246,6 +320,7 @@ def fullscreen_func():
 def submit():
     global morph_size, morph_size_var, threshold_area_var, threshold_area, threshold_area_max_var, threshold_area_max, pik
     global offset_y_l, offset_x_h, offset_y_h, offset_x_l, offset_y_l_var, offset_x_h_var, offset_x_l_var, offset_y_h_var
+    global threshold
     morph_size = int(morph_size_var.get())
     threshold_area = int(threshold_area_var.get())
     threshold_area_max = int(threshold_area_max_var.get())
@@ -253,6 +328,7 @@ def submit():
     offset_x_h = int(offset_x_h_var.get())
     offset_y_h = int(offset_y_h_var.get())
     offset_y_l = int(offset_y_l_var.get())
+    threshold = int(threshold_var.get())
 
 
 def create_entry(text, variable, row):
@@ -278,6 +354,7 @@ create_entry("Min x-offset", offset_x_l_var, 4)
 create_entry("Max x-offset", offset_x_h_var, 5)
 create_entry("Min y-offset", offset_y_l_var, 6)
 create_entry("Max y-offset", offset_y_h_var, 7)
+create_entry("Threshold", threshold_var, 8)
 
 while not finished:
     cv2.waitKey(1)
