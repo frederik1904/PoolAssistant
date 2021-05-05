@@ -51,7 +51,7 @@ arucoParams = cv2.aruco.DetectorParameters_create()
 
 def get_aruco(marker_id, size):
     new_image = np.zeros((size, size, 1), np.uint8)
-    cv2.aruco.drawMarker(arucoDict, marker_id, size, new_image, 1)
+    cv2.aruco.drawMarker(arucoDict, marker_id, size, new_image)
     new_image = cv2.cvtColor(new_image, cv.COLOR_GRAY2RGB)
     return new_image
 
@@ -160,13 +160,17 @@ def test(a):
     global fps, fps_acc, fps_avg, time, frame_to_show, reset_first_img, finished, pik, debug, width, height
 
     src_points = []
-    width, height = (1024 + offset_x_l + offset_x_h, 512 + offset_y_l + offset_y_h)
-    cap = cv2.VideoCapture(1)
+    width, height = (1280, 740)
+
+    cap = cv2.VideoCapture(2)
     src_points = calibrate_board_corners(cap)
     print("Found corners")
     dst_points = np.float32([(0, 0), (width, 0), (width, height), (0, height)]).reshape(-1, 1, 2)
     M, mask = cv2.findHomography(np.float32(src_points).reshape(-1, 1, 2), dst_points, cv2.RANSAC, 5.0)
-    calibrate_projector(cap, M)
+    src_points, dst_points = calibrate_projector(cap, M)
+    M, mask = cv2.findHomography(src_points, dst_points, cv2.RANSAC, 5.0)
+    width, height = (1280, 800)
+    reset_first_img = True
     ret, frame = cap.read()
     img2 = frame
     frame_to_show = frame
@@ -176,22 +180,22 @@ def test(a):
         ret, frame = cap.read()
         if not ret:
             break
-        dst_points = np.float32([(0 + offset_x_l, 0 + offset_y_l),
-                                 (width + offset_x_h, 0 + offset_y_l),
-                                 (width + offset_x_h, height + offset_y_h),
-                                 (0 + offset_x_l, height + offset_y_h)]
-                                ).reshape(-1, 1, 2)
+        # dst_points = np.float32([(0 + offset_x_l, 0 + offset_y_l),
+        #                         (width + offset_x_h, 0 + offset_y_l),
+        #                         (width + offset_x_h, height + offset_y_h),
+        #                         (0 + offset_x_l, height + offset_y_h)]
+        #                        ).reshape(-1, 1, 2)
 
-        M, mask = cv2.findHomography(np.float32(src_points).reshape(-1, 1, 2), dst_points, cv2.RANSAC, 5.0)
+        # M, mask = cv2.findHomography(np.float32(src_points).reshape(-1, 1, 2), dst_points, cv2.RANSAC, 5.0)
         frame = cv2.warpPerspective(frame, M, (width, height))
         if reset_first_img:
             frame_to_show = np.zeros((height, width, 3), np.uint8)
             t.sleep(1)
             ret, frame = cap.read()
-            dst_points = np.float32([(0 + offset_x_l, 0 + offset_y_l), (width + offset_x_h, 0 + offset_y_l),
-                                     (width + offset_x_h, height + offset_y_h),
-                                     (0 + offset_x_l, height + offset_y_h)]).reshape(-1, 1, 2)
-            M, mask = cv2.findHomography(np.float32(src_points).reshape(-1, 1, 2), dst_points, cv2.RANSAC, 5.0)
+            # dst_points = np.float32([(0 + offset_x_l, 0 + offset_y_l), (width + offset_x_h, 0 + offset_y_l),
+            #                         (width + offset_x_h, height + offset_y_h),
+            #                         (0 + offset_x_l, height + offset_y_h)]).reshape(-1, 1, 2)
+            # M, mask = cv2.findHomography(np.float32(src_points).reshape(-1, 1, 2), dst_points, cv2.RANSAC, 5.0)
             frame = cv2.warpPerspective(frame, M, (width, height))
             img2 = frame
             reset_first_img = False
@@ -216,8 +220,9 @@ def insert_marker_on_img(marker, img, cord, size):
 def calibrate_projector(cap, homography_m):
     global height, width, frame_to_show, debug_frame
     size = 100
-    initial_offset = 100
-    buffer = 5
+    initial_offset = 25
+    buffer = 15
+    sleep_b = 0.4
     ids_to_find = [2, 3, 4, 5]
     aruco_images = [get_aruco(marker_id, size) for marker_id in ids_to_find]
 
@@ -228,47 +233,168 @@ def calibrate_projector(cap, homography_m):
     marker_3 = (center[0] - size - buffer, center[1] + buffer)  # Top Right
     marker_4 = (center[0] + buffer, center[1] + buffer)  # Bottom Right
     marker_5 = (center[0] + buffer, center[1] - size - buffer)  # Bottom Left
-    markers = [(marker_2, -initial_offset, -1), (marker_3, initial_offset, -1), (marker_4, initial_offset, 1), (marker_5, -initial_offset, 1)]
-    while len(src_points) < 4:
+    markers = [
+        [marker_2, -initial_offset, -1, False],
+        [marker_3, -initial_offset, 1, False],
+        [marker_4, initial_offset, -1, False],
+        [marker_5, initial_offset, 1, False]
+    ]
+    img_to_show = np.zeros((height, width, 3), np.uint8)
+    img_to_show[:, :] = (255, 255, 255)  # make image white
+    for index in range(len(markers)):
+        img_to_show = insert_marker_on_img(aruco_images[index], img_to_show, markers[index][0], size)
+    frame_to_show = img_to_show
+    t.sleep(sleep_b)
+    while not all([i[1] == 0 and i[2] == 0 for i in markers]):
         img_to_show = np.zeros((height, width, 3), np.uint8)
         img_to_show[:, :] = (255, 255, 255)  # make image white
         for index in range(len(markers)):
-            img_to_show = insert_marker_on_img(aruco_images[index], img_to_show, markers[index], size)
+            img_to_show = insert_marker_on_img(aruco_images[index], img_to_show, markers[index][0], size)
         frame_to_show = img_to_show
-
+        t.sleep(sleep_b)
         ret, frame = cap.read()
-        frame = cv.warpPerspective(frame, homography_m, (width, height))
+        #frame = cv.warpPerspective(frame, homography_m, (width, height))
         debug_frame = frame
         (corners, ids, rejected) = cv2.aruco.detectMarkers(frame, arucoDict, parameters=arucoParams)
 
         for marker_id in ids_to_find:
-            if marker_id in ids:
-                marker_t = markers[marker_id - 2]
-                if marker_t[1] != 0:
-                    marker_t[0][0] += marker_t[1]
-                elif marker_t[2] != 0:
-                    pass
-            else:
+            marker_t = markers[marker_id - 2]
+            new_touple = marker_t[0]
+            if ids is not None and marker_id in ids:
+                if marker_t[1] != 0:  # Checks that x is still being calibrated
+                    if marker_t[3]:  # Checks whether we just came from out of bounds
+                        marker_t[1] //= 2
+                        marker_t[1] *= -1
+                        marker_t[3] = False
+                    new_touple = (marker_t[1] + marker_t[0][0], marker_t[0][1])
+                    if not check_bounds(new_touple[1], new_touple[0], size, width, height):  # checks the bounds (duh)
+                        new_touple = marker_t[0]
+                        marker_t[1] = 0
+                        marker_t[2] *= initial_offset
+                        marker_t[3] = False
+                    if marker_t[1] == 0:  # Checks if we are about to change to calibrating the y-axis
+                        marker_t[1] = 0
+                        marker_t[2] *= initial_offset
+                        marker_t[3] = False
+                        new_touple = insert_buffer(new_touple, marker_id, buffer)
+                elif marker_t[2] != 0:  # Checks that y is still being calibrated
+                    if marker_t[3]:  # Checks whether we just came from out of bounds
+                        marker_t[2] //= 2
+                        marker_t[2] *= -1
+                        marker_t[3] = False
+                    new_touple = (marker_t[0][0], marker_t[0][1] + marker_t[2])
+                    if not check_bounds(new_touple[1], new_touple[0], size, width, height):
+                        new_touple = marker_t[0]
+                        marker_t[2] = 0
+                        marker_t[3] = False
+                    if marker_t[2] == 0:  # Checks if we are about to change to calibrating the y-axis
+                        marker_t[3] = False
+                        new_touple = insert_buffer(new_touple, marker_id, buffer, dir=1)
+            else:  # Marker cant be seen by camera
+                if marker_t[1] != 0:  # Checks that x is still being calibrated
+                    if not marker_t[3]:  # Checks whether we just came from out of bounds
+                        marker_t[1] //= 2
+                        marker_t[1] *= -1
+                        marker_t[3] = True
+                    new_touple = (marker_t[1] + marker_t[0][0], marker_t[0][1])
+                    if not check_bounds(new_touple[1], new_touple[0], size, width, height):  # checks the bounds (duh)
+                        new_touple = marker_t[0]
+                        marker_t[1] = 0
+                        marker_t[2] *= initial_offset
+                        marker_t[3] = True
+                    if marker_t[1] == 0:  # Checks if we are about to change to calibrating the y-axis
+                        marker_t[1] = 0
+                        marker_t[2] *= initial_offset
+                        marker_t[3] = True
+                        new_touple = insert_buffer(new_touple, marker_id, buffer)
+                elif marker_t[2] != 0:  # Checks that y is still being calibrated
+                    if not marker_t[3]:  # Checks whether we just came from out of bounds
+                        marker_t[2] //= 2
+                        marker_t[2] *= -1
+                        marker_t[3] = True
+                    new_touple = (marker_t[0][0], marker_t[0][1] + marker_t[2])
+                    if not check_bounds(new_touple[1], new_touple[0], size, width, height):
+                        new_touple = marker_t[0]
+                        marker_t[2] = 0
+                        marker_t[3] = True
+                    if marker_t[2] == 0:  # Checks if we are about to change to calibrating the y-axis
+                        marker_t[3] = True
+                        new_touple = insert_buffer(new_touple, marker_id, buffer, dir=1)
+            marker_t[0] = new_touple
 
+    src_points = []
+    dst_points = []
+    done = False
+    while not done:
+        ret, frame = cap.read()
+        (corners, ids, rejected) = cv2.aruco.detectMarkers(frame, arucoDict, parameters=arucoParams)
+        correct_ids = [mark_id for mark_id in ids if mark_id in ids_to_find]
 
-        # for (markerCorner, id) in zip(corners, ids):
-        #     if str(id) not in cornerDict:
-        #         corners = markerCorner.reshape((4, 2))
-        #         (topLeft, topRight, bottomRight, bottomLeft) = corners
-        #         c = topLeft
-        #         if id[0] == 1:
-        #             c = bottomLeft
-        #         elif id[0] == 69:
-        #             c = topLeft
-        #         elif id[0] == 420:
-        #             c = topRight
-        #         elif id[0] == 666:
-        #             c = topLeft
-        #         cornerDict[str(id)] = (c, id)
-        #         src_points.append([c, id])
+        if len(correct_ids) < 4:
+            print("Didnt find all that i wanted trying again")
+            t.sleep(.5)
+            continue
+
+        for (corner, marker_id) in zip(corners, ids):
+            if marker_id not in ids_to_find:
+                continue
+            corner = corner.reshape((4, 2))
+            marker_id = int(marker_id[0])
+            marker_y, marker_x = markers[marker_id - 2][0]
+            marker_x = int(marker_x)
+            marker_y = int(marker_y)
+            src_points.append((corner[marker_id - 2], marker_id))
+            if marker_id == 2:
+                dst_points.append(((marker_x, marker_y), marker_id))
+            elif marker_id == 3:
+                dst_points.append(((marker_x + size, marker_y), marker_id))
+            elif marker_id == 4:
+                touple = (marker_x + size, marker_y + size)
+                dst_points.append((touple, marker_id))
+            elif marker_id == 5:
+                dst_points.append(((marker_x, marker_y + size), marker_id))
+
+        done = True
+
     src_points.sort(key=lambda x: x[1])
+    dst_points.sort(key=lambda x: x[1])
     src_points = [item[0] for item in src_points]
-    return src_points
+    dst_points = [item[0] for item in dst_points]
+
+    #src_points.append(src_points.pop(1))
+    #src_points.append(src_points.pop(1))
+    #src_points.append(src_points.pop(1))
+
+    #dst_points.append(dst_points.pop(2))
+    #dst_points.append(dst_points.pop(1))
+
+    return np.float32(src_points).reshape(-1,1,2), np.float32(dst_points).reshape(-1,1,2)
+
+
+def insert_buffer(touple, id, buffer, dir=0):
+    x = y = 0
+    if dir == 0:
+        x = 1
+    else:
+        y = 1
+    if id == 2:
+        return touple[0] + (buffer * x), touple[1] + (buffer * y)
+    elif id == 3:
+        return touple[0] + (buffer * x), touple[1] - (buffer * y)
+    elif id == 4:
+        return touple[0] - (buffer * x), touple[1] - (buffer * y)
+    elif id == 5:
+        return touple[0] - (buffer * x), touple[1] + (buffer * y)
+    exit(1337)
+
+
+# True if it is in bounds false otherwise
+def check_bounds(x, y, size, width, height):
+    if x < 0 or x + size > width:
+        return False
+    if y < 0 or y + size > height:
+        return False
+    return True
 
 
 def calibrate_board_corners(cap):
@@ -356,14 +482,14 @@ create_entry("Min y-offset", offset_y_l_var, 6)
 create_entry("Max y-offset", offset_y_h_var, 7)
 create_entry("Threshold", threshold_var, 8)
 
+cv2.namedWindow("Window_Show")
+cv2.moveWindow("Window_Show", 2048, 0)
+cv2.namedWindow("Debug_Window_Show")
+cv2.moveWindow("Debug_Window_Show", 0, 0)
+
 while not finished:
     cv2.waitKey(1)
     cv.imshow('Window_Show', frame_to_show)
     cv.imshow("Debug_Window_Show", debug_frame)
-    if fullscreen:
-        cv2.namedWindow("Window_Show", cv2.WND_PROP_FULLSCREEN)
-        cv2.setWindowProperty("Window_Show", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
-    else:
-        cv2.namedWindow("Window_Show", cv2.WND_PROP_AUTOSIZE)
-        cv2.setWindowProperty("Window_Show", cv2.WND_PROP_AUTOSIZE, cv2.WINDOW_NORMAL)
+
     top.update()
