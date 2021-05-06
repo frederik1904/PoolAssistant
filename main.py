@@ -112,7 +112,7 @@ def find_boxes_from_img(img, output, w, h, last_out):
         black_canvas = cv.circle(black_canvas, (int(x), int(y)), 25, (255, 255, 255), 5)
         contour_cords.append(cont)
     pos, radius = find_avg_color(output, thresh_gray2)
-    find_cue(output, tg_copy, pos)
+    find_cue(output, tg_copy, pos, black_canvas)
     black_canvas = cv.circle(black_canvas, pos, radius + 60, (255, 255, 255), 5)
 
     output = cv.putText(output, "FPS: " + str(fps) + ", AVG: " + str(fps_avg), (0, 500), cv2.FONT_HERSHEY_SIMPLEX,
@@ -158,7 +158,7 @@ def find_avg_color(frame, diff):
     return maxLoc, radius
 
 
-def find_cue(img, diff, pos):
+def find_cue(img, diff, pos, frame_to_show):
     global cue_frame
     h, w = 200, 200
     x, y = pos
@@ -166,11 +166,14 @@ def find_cue(img, diff, pos):
     src_points = np.float32([(x - h // 2, y - w // 2), (x - h // 2, y + w // 2), (x + h // 2, y + w // 2),
                              (x + h // 2, y - h // 2)]).reshape(-1, 1, 2)
     M, mask = cv2.findHomography(src_points, dst_points)
+    M_back = np.linalg.inv(M)
+    diff = cv2.warpPerspective(diff, M, (h, w))
 
     contours, _ = cv.findContours(diff, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    found_cue = False
     for cont in contours:
-        if cv2.contourArea(cont) < 10:
-            cv2.fillPoly(diff,pts=[cont],color=0)
+        if cv2.contourArea(cont) < 100:
+            cv2.fillPoly(diff, pts=[cont], color=0)
             continue
         (x, y), (we, he), angle = cv.minAreaRect(cont)
         if min(we, he) == 0:
@@ -178,11 +181,23 @@ def find_cue(img, diff, pos):
         aspect_ratio = max(we, he) / min(we, he)
         if aspect_ratio < 2:  # or w > 100 or h > 100:
             cv2.fillPoly(diff, pts=[cont], color=0)
-        else: #This is the cue?
+        else:  # This is the cue?
+            found_cue = True
+            try:
+                cont = cv2.perspectiveTransform(np.float32(cont), M_back)
 
+                rows, cols = frame_to_show.shape[:2]
+                [vx, vy, x, y] = cv.fitLine(cont, cv.DIST_L2, 0, 0.01, 0.01)
+                lefty = int((-x * vy / vx) + y)
+                righty = int(((cols - x) * vy / vx) + y)
 
+                cv.line(frame_to_show, (cols - 1, righty), (0, lefty), (255, 255, 255), 8)
+            except cv2.error or OverflowError:
+                continue
+
+    print(found_cue)
     cue_frame = np.vstack(
-        [cv2.warpPerspective(img, M, (h, w)), cv2.cvtColor(cv2.warpPerspective(diff, M, (h, w)), cv2.COLOR_GRAY2RGB)])
+       [cv2.warpPerspective(img, M, (h, w)),cv2.cvtColor(diff,cv2.COLOR_GRAY2RGB)])
 
 
 def test(a):
@@ -192,7 +207,7 @@ def test(a):
     src_points = []
     width, height = (1280, 740)
 
-    cap = cv2.VideoCapture(2)
+    cap = cv2.VideoCapture(1)
     src_points = calibrate_board_corners(cap)
     print("Found corners")
     dst_points = np.float32([(0, 0), (width, 0), (width, height), (0, height)]).reshape(-1, 1, 2)
@@ -238,14 +253,12 @@ def insert_marker_on_img(marker, img, cord, size):
 def calibrate_projector(cap, homography_m):
     global height, width, frame_to_show, debug_frame
     size = 100
-    initial_offset = 25
-    buffer = 20
+    initial_offset = 50
+    buffer = 150
     sleep_b = 0.4
     ids_to_find = [2, 3, 4, 5]
     aruco_images = [get_aruco(marker_id, size) for marker_id in ids_to_find]
 
-    cornerDict = {}
-    src_points = []
     center = (height // 2, width // 2)
     marker_2 = (center[0] - size - buffer, center[1] - size - buffer)  # Top Left
     marker_3 = (center[0] - size - buffer, center[1] + buffer)  # Top Right
@@ -263,70 +276,70 @@ def calibrate_projector(cap, homography_m):
         img_to_show = insert_marker_on_img(aruco_images[index], img_to_show, markers[index][0], size)
     frame_to_show = img_to_show
     t.sleep(sleep_b)
-    while not all([i[1] == 0 and i[2] == 0 for i in markers]):
-        img_to_show = np.zeros((height, width, 3), np.uint8)
-        img_to_show[:, :] = (255, 255, 255)  # make image white
-        for index in range(len(markers)):
-            img_to_show = insert_marker_on_img(aruco_images[index], img_to_show, markers[index][0], size)
-        frame_to_show = img_to_show
-        t.sleep(sleep_b)
-        ret, frame = cap.read()
-        # frame = cv.warpPerspective(frame, homography_m, (width, height))
-        debug_frame = frame
-        (corners, ids, rejected) = cv2.aruco.detectMarkers(frame, arucoDict, parameters=arucoParams)
-
-        for marker_id in ids_to_find:
-            marker_t = markers[marker_id - 2]
-            new_touple = marker_t[0]
-            if ids is not None and marker_id in ids:
-                if marker_t[1] != 0:  # Checks that x is still being calibrated
-                    if marker_t[3]:  # Checks whether we just came from out of bounds
-                        marker_t[1] //= 2
-                        marker_t[1] *= -1
-                        marker_t[3] = False
-                    new_touple = (marker_t[1] + marker_t[0][0], marker_t[0][1])
-                    if not check_bounds(new_touple[1], new_touple[0], size, width, height) or marker_t[
-                        1] == 0:  # checks the bounds (duh) or Checks if we are about to change to calibrating the y-axis
-                        new_touple = insert_buffer(marker_t[0], marker_id, buffer)
-                        marker_t[1] = 0
-                        marker_t[2] *= initial_offset
-                        marker_t[3] = False
-                elif marker_t[2] != 0:  # Checks that y is still being calibrated
-                    if marker_t[3]:  # Checks whether we just came from out of bounds
-                        marker_t[2] //= 2
-                        marker_t[2] *= -1
-                        marker_t[3] = False
-                    new_touple = (marker_t[0][0], marker_t[0][1] + marker_t[2])
-                    if not check_bounds(new_touple[1], new_touple[0], size, width, height) or marker_t[
-                        2] == 0:  # Checks if we are about to change to calibrating the y-axis
-                        new_touple = insert_buffer(marker_t[0], marker_id, buffer, dir=1)
-                        marker_t[2] = 0
-                        marker_t[3] = False
-            else:  # Marker cant be seen by camera
-                if marker_t[1] != 0:  # Checks that x is still being calibrated
-                    if not marker_t[3]:  # Checks whether we just came from out of bounds
-                        marker_t[1] //= 2
-                        marker_t[1] *= -1
-                        marker_t[3] = True
-                    new_touple = (marker_t[1] + marker_t[0][0], marker_t[0][1])
-                    if not check_bounds(new_touple[1], new_touple[0], size, width, height) or marker_t[
-                        1] == 0:  # Checks if we are about to change to calibrating the y-axis or checks the bounds (duh)
-                        new_touple = insert_buffer(marker_t[0], marker_id, buffer)
-                        marker_t[1] = 0
-                        marker_t[2] *= initial_offset
-                        marker_t[3] = True
-                elif marker_t[2] != 0:  # Checks that y is still being calibrated
-                    if not marker_t[3]:  # Checks whether we just came from out of bounds
-                        marker_t[2] //= 2
-                        marker_t[2] *= -1
-                        marker_t[3] = True
-                    new_touple = (marker_t[0][0], marker_t[0][1] + marker_t[2])
-                    if not check_bounds(new_touple[1], new_touple[0], size, width, height) or marker_t[
-                        2] == 0:  # Checks if we are about to change to calibrating the y-axis
-                        new_touple = insert_buffer(marker_t[0], marker_id, buffer, dir=1)
-                        marker_t[2] = 0
-                        marker_t[3] = True
-            marker_t[0] = new_touple
+    # while not all([i[1] == 0 and i[2] == 0 for i in markers]):
+    #     img_to_show = np.zeros((height, width, 3), np.uint8)
+    #     img_to_show[:, :] = (255, 255, 255)  # make image white
+    #     for index in range(len(markers)):
+    #         img_to_show = insert_marker_on_img(aruco_images[index], img_to_show, markers[index][0], size)
+    #     frame_to_show = img_to_show
+    #     t.sleep(sleep_b)
+    #     ret, frame = cap.read()
+    #     # frame = cv.warpPerspective(frame, homography_m, (width, height))
+    #     debug_frame = frame
+    #     (corners, ids, rejected) = cv2.aruco.detectMarkers(frame, arucoDict, parameters=arucoParams)
+    #
+    #     for marker_id in ids_to_find:
+    #         marker_t = markers[marker_id - 2]
+    #         new_touple = marker_t[0]
+    #         if ids is not None and marker_id in ids:
+    #             if marker_t[1] != 0:  # Checks that x is still being calibrated
+    #                 if marker_t[3]:  # Checks whether we just came from out of bounds
+    #                     marker_t[1] //= 2
+    #                     marker_t[1] *= -1
+    #                     marker_t[3] = False
+    #                 new_touple = (marker_t[1] + marker_t[0][0], marker_t[0][1])
+    #                 if not check_bounds(new_touple[1], new_touple[0], size, width, height) or marker_t[
+    #                     1] == 0:  # checks the bounds (duh) or Checks if we are about to change to calibrating the y-axis
+    #                     new_touple = insert_buffer(marker_t[0], marker_id, buffer)
+    #                     marker_t[1] = 0
+    #                     marker_t[2] *= initial_offset
+    #                     marker_t[3] = False
+    #             elif marker_t[2] != 0:  # Checks that y is still being calibrated
+    #                 if marker_t[3]:  # Checks whether we just came from out of bounds
+    #                     marker_t[2] //= 2
+    #                     marker_t[2] *= -1
+    #                     marker_t[3] = False
+    #                 new_touple = (marker_t[0][0], marker_t[0][1] + marker_t[2])
+    #                 if not check_bounds(new_touple[1], new_touple[0], size, width, height) or marker_t[
+    #                     2] == 0:  # Checks if we are about to change to calibrating the y-axis
+    #                     new_touple = insert_buffer(marker_t[0], marker_id, buffer, dir=1)
+    #                     marker_t[2] = 0
+    #                     marker_t[3] = False
+    #         else:  # Marker cant be seen by camera
+    #             if marker_t[1] != 0:  # Checks that x is still being calibrated
+    #                 if not marker_t[3]:  # Checks whether we just came from out of bounds
+    #                     marker_t[1] //= 2
+    #                     marker_t[1] *= -1
+    #                     marker_t[3] = True
+    #                 new_touple = (marker_t[1] + marker_t[0][0], marker_t[0][1])
+    #                 if not check_bounds(new_touple[1], new_touple[0], size, width, height) or marker_t[
+    #                     1] == 0:  # Checks if we are about to change to calibrating the y-axis or checks the bounds (duh)
+    #                     new_touple = insert_buffer(marker_t[0], marker_id, buffer)
+    #                     marker_t[1] = 0
+    #                     marker_t[2] *= initial_offset
+    #                     marker_t[3] = True
+    #             elif marker_t[2] != 0:  # Checks that y is still being calibrated
+    #                 if not marker_t[3]:  # Checks whether we just came from out of bounds
+    #                     marker_t[2] //= 2
+    #                     marker_t[2] *= -1
+    #                     marker_t[3] = True
+    #                 new_touple = (marker_t[0][0], marker_t[0][1] + marker_t[2])
+    #                 if not check_bounds(new_touple[1], new_touple[0], size, width, height) or marker_t[
+    #                     2] == 0:  # Checks if we are about to change to calibrating the y-axis
+    #                     new_touple = insert_buffer(marker_t[0], marker_id, buffer, dir=1)
+    #                     marker_t[2] = 0
+    #                     marker_t[3] = True
+    #         marker_t[0] = new_touple
 
     src_points = []
     dst_points = []
