@@ -4,13 +4,14 @@ import cv2
 import cv2 as cv
 import numpy as np
 import time as t
-
+import imageio
+from imutils.video import FPS
 top = tk.Tk()
 fps = 0
 fps_avg = 0
 fps_acc = 0
-start_t = t.perf_counter()
-time = t.perf_counter()
+start_t = t.time()
+time = t.time()
 debug = False
 fullscreen = False
 reset_first_img = False
@@ -28,7 +29,7 @@ threshold_area_var = tk.StringVar()
 threshold_area_max_var = tk.StringVar()
 threshold_area_var.set(str(threshold_area))
 threshold_area_max_var.set(str(threshold_area_max))
-width, height = 1024, 512
+width, height = (1280, 740)
 offset_x_h = -30
 offset_x_h_var = tk.StringVar()
 offset_x_h_var.set(str(offset_x_h))
@@ -41,6 +42,10 @@ offset_y_h_var.set(str(offset_y_h))
 offset_y_l = -8
 offset_y_l_var = tk.StringVar()
 offset_y_l_var.set(str(offset_y_l))
+
+producer_consumer_img = 0
+producer_consumer_img_count = 0
+producer_consumer_img_lock = threading.Lock()
 
 threshold = 80
 threshold_var = tk.StringVar()
@@ -79,6 +84,7 @@ def find_diff(img1, img2):
 
 def find_boxes_from_img(img, output, w, h, last_out):
     global debug_frame, debug
+    start_time = t.time()
     ret, thresh_gray = cv.threshold(cv.cvtColor(img, cv.COLOR_BGR2GRAY), threshold, 255, cv.THRESH_BINARY)
     tg_copy = thresh_gray.copy()
     # thresh_gray = thresh_gray - cv.cvtColor(last_out, cv.COLOR_BGR2GRAY)
@@ -97,7 +103,7 @@ def find_boxes_from_img(img, output, w, h, last_out):
         if aspect_ratio > 2.5:  # or w > 100 or h > 100:
             cv2.fillPoly(thresh_gray, pts=[cont], color=0)
             continue
-
+    time_p1 = t.time()
     thresh_gray2 = cv2.morphologyEx(thresh_gray, cv.MORPH_CLOSE,
                                     cv.getStructuringElement(cv.MORPH_ELLIPSE, (morph_size, morph_size)))
     contours, hier = cv.findContours(thresh_gray, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE)
@@ -111,15 +117,22 @@ def find_boxes_from_img(img, output, w, h, last_out):
         (x, y), (w, h), _ = rect
         black_canvas = cv.circle(black_canvas, (int(x), int(y)), 25, (255, 255, 255), 5)
         contour_cords.append(cont)
+    time_p2 = t.time()
     pos, radius = find_avg_color(output, thresh_gray2)
     find_cue(output, tg_copy, pos, black_canvas)
+    time_p3 = t.time()
     black_canvas = cv.circle(black_canvas, pos, radius + 60, (255, 255, 255), 5)
-
-    output = cv.putText(output, "FPS: " + str(fps) + ", AVG: " + str(fps_avg), (0, 500), cv2.FONT_HERSHEY_SIMPLEX,
+    black_canvas = cv.putText(black_canvas, "FPS: " + str(fps) + ", AVG: " + str(fps_avg), (0, 500), cv2.FONT_HERSHEY_SIMPLEX,
                         3, (255, 255, 255))
-    backtorgb1 = cv2.cvtColor(thresh_gray, cv2.COLOR_GRAY2RGB)
-    backtorgb = cv2.cvtColor(thresh_gray2, cv2.COLOR_GRAY2RGB)
-    debug_frame = np.vstack([np.hstack([img, backtorgb1]), np.hstack([backtorgb, output])])
+    # output = cv.putText(output, "FPS: " + str(fps) + ", AVG: " + str(fps_avg), (0, 500), cv2.FONT_HERSHEY_SIMPLEX,
+    #                    3, (255, 255, 255))
+    # backtorgb1 = cv2.cvtColor(thresh_gray, cv2.COLOR_GRAY2RGB)
+    # backtorgb = cv2.cvtColor(thresh_gray2, cv2.COLOR_GRAY2RGB)
+    # debug_frame = np.vstack([np.hstack([img, backtorgb1]), np.hstack([backtorgb, output])])
+    time_p4 = t.time()
+    if time_p4 - start_time > 0.016:
+        print(
+            f"Time diff p1: {time_p1 - start_time}, p2: {time_p2 - time_p1}, p3: {time_p3 - time_p2}, p4: {time_p4 - time_p3}, total: {time_p4 - start_time}")
     if debug:
         return np.vstack([np.hstack([img, backtorgb1]), np.hstack([backtorgb, output])])
     else:
@@ -139,7 +152,6 @@ def create_homography_and_wrap(img, src_points, dest_points, height, width):
     if circles is not None:
         circles = np.round(circles[0, :]).astype("int")
         for (x, y, r) in circles:
-            print(r)
             p_origin_homogenous = np.array((x, y, 1)).reshape(3, 1)
             temp_p = M_back.dot(p_origin_homogenous)
             sum = np.sum(temp_p, 1)
@@ -195,40 +207,78 @@ def find_cue(img, diff, pos, frame_to_show):
             except cv2.error or OverflowError:
                 continue
 
-    print(found_cue)
     cue_frame = np.vstack(
-       [cv2.warpPerspective(img, M, (h, w)),cv2.cvtColor(diff,cv2.COLOR_GRAY2RGB)])
+        [cv2.warpPerspective(img, M, (h, w)), cv2.cvtColor(diff, cv2.COLOR_GRAY2RGB)])
 
 
-def test(a):
+def img_producer():
+    global producer_consumer_img_lock, producer_consumer_img, producer_consumer_img_count, finished
+    cap = cv2.VideoCapture(2)
+    cap.set(cv.CAP_PROP_FRAME_WIDTH, 1920)
+    cap.set(cv.CAP_PROP_FRAME_HEIGHT, 1080)
+    cap.set(cv.CAP_PROP_FPS, 60)
+    cap.set(cv.CAP_PROP_FOURCC, cv.VideoWriter_fourcc(*'MJPG'))
+    ret, frame = cap.read()
+    time_acc = 0
+    while not finished and ret:
+        start = t.time()
+
+        ret, frame = cap.read()
+
+        time_acc += t.time() - start
+        print(t.time() - start)
+        producer_consumer_img_lock.acquire()
+        producer_consumer_img = frame
+        producer_consumer_img_count += 1
+        print(time_acc / producer_consumer_img_count)
+        producer_consumer_img_lock.release()
+
+
+
+def get_image(img_count):
+    global producer_consumer_img, producer_consumer_img_count, producer_consumer_img_lock
+    img = 0
+    img_number = 0
+    while True:
+        producer_consumer_img_lock.acquire()
+        if img_count >= producer_consumer_img_count:
+            producer_consumer_img_lock.release()
+            continue
+        img = producer_consumer_img
+        img_number = producer_consumer_img_count
+        producer_consumer_img_lock.release()
+        break
+    return img, img_number
+
+
+def img_consumer():
     # Load calib values
     global fps, fps_acc, fps_avg, time, frame_to_show, reset_first_img, finished, pik, debug, width, height
+    global producer_consumer_img_lock, producer_consumer_img, producer_consumer_img_count
 
-    src_points = []
-    width, height = (1280, 740)
-
-    cap = cv2.VideoCapture(1)
-    src_points = calibrate_board_corners(cap)
-    print("Found corners")
-    dst_points = np.float32([(0, 0), (width, 0), (width, height), (0, height)]).reshape(-1, 1, 2)
-    M, mask = cv2.findHomography(np.float32(src_points).reshape(-1, 1, 2), dst_points, cv2.RANSAC, 5.0)
-    src_points, dst_points = calibrate_projector(cap, M)
+    # cap = cv2.VideoCapture(1)
+    # src_points = calibrate_board_corners(cap)
+    # dst_points = np.float32([(0, 0), (width, 0), (width, height), (0, height)]).reshape(-1, 1, 2)
+    # M, mask = cv2.findHomography(np.float32(src_points).reshape(-1, 1, 2), dst_points, cv2.RANSAC, 5.0)
+    src_points, dst_points = calibrate_projector()
     M, mask = cv2.findHomography(src_points, dst_points, cv2.RANSAC, 5.0)
     reset_first_img = True
-    ret, frame = cap.read()
+    frame, frame_count = get_image(0)
     img2 = frame
     frame_to_show = frame
     img2 = cv2.warpPerspective(img2, M, (width, height))
     lastOutput = black_canvas = np.zeros((height, width, 3), np.uint8)
-    while ret:
-        ret, frame = cap.read()
-        if not ret:
-            break
+    time = t.time()
+    while not finished:
+        frame, frame_count = get_image(frame_count)
+
+        time_s = t.time()
         frame = cv2.warpPerspective(frame, M, (width, height))
+        time_p1 = t.time()
         if reset_first_img:
             frame_to_show = np.zeros((height, width, 3), np.uint8)
             t.sleep(1)
-            ret, frame = cap.read()
+            frame, frame_count = get_image(frame_count)
             frame = cv2.warpPerspective(frame, M, (width, height))
             img2 = frame
             reset_first_img = False
@@ -238,10 +288,12 @@ def test(a):
         frame_to_show = find_boxes_from_img(diff_img, frame, width, height, lastOutput)
         if not debug:
             lastOutput = frame_to_show
-        fps = int(1 / float((t.perf_counter() - time)))
+        fps = int(1 / float((t.time() - time)))
         fps_acc += 1
-        fps_avg = int(fps_acc / (t.perf_counter() - start_t))
-        time = t.perf_counter()
+        fps_avg = int(fps_acc / (t.time() - start_t))
+        time = t.time()
+
+        #print(fps_avg, fps, f"Time spent warping: {time_p1 - time_s}, Time spent on img: {t.time() - time_s}")
     finished = True
 
 
@@ -250,7 +302,7 @@ def insert_marker_on_img(marker, img, cord, size):
     return img
 
 
-def calibrate_projector(cap, homography_m):
+def calibrate_projector():
     global height, width, frame_to_show, debug_frame
     size = 100
     initial_offset = 50
@@ -344,9 +396,13 @@ def calibrate_projector(cap, homography_m):
     src_points = []
     dst_points = []
     done = False
+    frame_count = 0
     while not done:
-        ret, frame = cap.read()
+        frame, frame_count = get_image(frame_count)
         (corners, ids, rejected) = cv2.aruco.detectMarkers(frame, arucoDict, parameters=arucoParams)
+        if ids is None:
+            t.sleep(.5)
+            continue
         correct_ids = [mark_id for mark_id in ids if mark_id in ids_to_find]
 
         if len(correct_ids) < 4:
@@ -442,7 +498,8 @@ def calibrate_board_corners(cap):
     return src_points
 
 
-threading.Thread(target=lambda a: test(a), args=(["Test"])).start()
+threading.Thread(target=img_producer).start()
+threading.Thread(target=img_consumer).start()
 
 
 def change_debug_mode():
@@ -458,8 +515,8 @@ def reset_first_img_func():
 
 
 def fullscreen_func():
-    global fullscreen
-    fullscreen = not fullscreen
+    global finished
+    finished = True
 
 
 def submit():
@@ -489,7 +546,7 @@ reset_first_img_button = tk.Button(text="RESET DIFF IMAGE", command=reset_first_
 reset_first_img_button.grid(row=0, column=1)
 submit_button = tk.Button(text="Submit entries", command=submit)
 submit_button.grid(row=0, column=2)
-fullscreen_button = tk.Button(text="FULSCREEN", command=fullscreen)
+fullscreen_button = tk.Button(text="FULSCREEN", command=fullscreen_func)
 fullscreen_button.grid(row=0, column=3)
 
 create_entry("Morph size: ", morph_size_var, 1)
@@ -502,14 +559,14 @@ create_entry("Max y-offset", offset_y_h_var, 7)
 create_entry("Threshold", threshold_var, 8)
 
 cv2.namedWindow("Window_Show")
-cv2.moveWindow("Window_Show", 2048, 0)
-cv2.namedWindow("Debug_Window_Show")
-cv2.moveWindow("Debug_Window_Show", 0, 0)
+# cv2.moveWindow("Window_Show", 2048, 0)
+# cv2.namedWindow("Debug_Window_Show")
+# cv2.moveWindow("Debug_Window_Show", 0, 0)
 
 while not finished:
     cv2.waitKey(1)
     cv.imshow('Window_Show', frame_to_show)
-    cv.imshow("Debug_Window_Show", debug_frame)
-    cv.imshow("Cue_window_show", cue_frame)
+    # cv.imshow("Debug_Window_Show", debug_frame)
+    # cv.imshow("Cue_window_show", cue_frame)
 
     top.update()
