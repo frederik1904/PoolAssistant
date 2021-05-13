@@ -4,8 +4,7 @@ import cv2
 import cv2 as cv
 import numpy as np
 import time as t
-import imageio
-from imutils.video import FPS
+
 top = tk.Tk()
 fps = 0
 fps_avg = 0
@@ -47,12 +46,23 @@ producer_consumer_img = 0
 producer_consumer_img_count = 0
 producer_consumer_img_lock = threading.Lock()
 
-threshold = 80
+threshold = 60
 threshold_var = tk.StringVar()
 threshold_var.set(str(threshold))
 
 arucoDict = cv2.aruco.Dictionary_get(cv2.aruco.DICT_6X6_1000)
 arucoParams = cv2.aruco.DetectorParameters_create()
+
+
+def draw_magic_lines_of_helpiness():
+    global outer_M, outer_M_inv, M, debug_frame, img2_outer
+    # Step 1: Homography
+    debug_frame = outer_wrapped
+    #
+    # Step 2: Find line
+    # Step 3: ????
+    # Step 4: Profit
+    pass
 
 
 def get_aruco(marker_id, size):
@@ -90,6 +100,7 @@ def find_boxes_from_img(img, output, w, h, last_out):
     # thresh_gray = thresh_gray - cv.cvtColor(last_out, cv.COLOR_BGR2GRAY)
     contours, hier = cv.findContours(thresh_gray, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
     black_canvas = np.zeros((h, w, 3), np.uint8)
+    black_canvas[:, :] = (255, 255, 255)  # not so black now
     for cont in contours:
         area = cv.contourArea(cont)
 
@@ -107,23 +118,24 @@ def find_boxes_from_img(img, output, w, h, last_out):
     thresh_gray2 = cv2.morphologyEx(thresh_gray, cv.MORPH_CLOSE,
                                     cv.getStructuringElement(cv.MORPH_ELLIPSE, (morph_size, morph_size)))
     contours, hier = cv.findContours(thresh_gray, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE)
-    contour_cords = []
+    # contour_cords = []
     for cont in contours:
         area = cv.contourArea(cont)
         if area < threshold_area or area > threshold_area_max:
             cv2.fillPoly(thresh_gray2, pts=[cont], color=0)
             continue
-        rect = cv.minAreaRect(cont)
-        (x, y), (w, h), _ = rect
-        black_canvas = cv.circle(black_canvas, (int(x), int(y)), 25, (255, 255, 255), 5)
-        contour_cords.append(cont)
+        # rect = cv.minAreaRect(cont)
+        # (x, y), (w, h), _ = rect
+        # black_canvas = cv.circle(black_canvas, (int(x), int(y)), 25, (255, 255, 255), 5)
+        # contour_cords.append(cont)
     time_p2 = t.time()
     pos, radius = find_avg_color(output, thresh_gray2)
-    find_cue(output, tg_copy, pos, black_canvas)
+    # draw_magic_lines_of_helpiness()
+    find_cue(output, tg_copy, pos, black_canvas, radius + 60)
     time_p3 = t.time()
-    black_canvas = cv.circle(black_canvas, pos, radius + 60, (255, 255, 255), 5)
-    black_canvas = cv.putText(black_canvas, "FPS: " + str(fps) + ", AVG: " + str(fps_avg), (0, 500), cv2.FONT_HERSHEY_SIMPLEX,
-                        3, (255, 255, 255))
+    black_canvas = cv.circle(black_canvas, pos, radius + 60, (0, 255, 255), 5)
+    # black_canvas = cv.putText(black_canvas, "FPS: " + str(fps) + ", AVG: " + str(fps_avg), (0, 500), cv2.FONT_HERSHEY_SIMPLEX,
+    # 3, (255, 255, 255))
     # output = cv.putText(output, "FPS: " + str(fps) + ", AVG: " + str(fps_avg), (0, 500), cv2.FONT_HERSHEY_SIMPLEX,
     #                    3, (255, 255, 255))
     # backtorgb1 = cv2.cvtColor(thresh_gray, cv2.COLOR_GRAY2RGB)
@@ -170,7 +182,7 @@ def find_avg_color(frame, diff):
     return maxLoc, radius
 
 
-def find_cue(img, diff, pos, frame_to_show):
+def find_cue(img, diff, pos, frame_to_show,rasmus_the_radius):
     global cue_frame
     h, w = 200, 200
     x, y = pos
@@ -196,6 +208,7 @@ def find_cue(img, diff, pos, frame_to_show):
         else:  # This is the cue?
             found_cue = True
             try:
+                cont_to_fill = cont.copy()
                 cont = cv2.perspectiveTransform(np.float32(cont), M_back)
 
                 rows, cols = frame_to_show.shape[:2]
@@ -203,17 +216,24 @@ def find_cue(img, diff, pos, frame_to_show):
                 lefty = int((-x * vy / vx) + y)
                 righty = int(((cols - x) * vy / vx) + y)
 
-                cv.line(frame_to_show, (cols - 1, righty), (0, lefty), (255, 255, 255), 8)
-            except cv2.error or OverflowError:
+                cv.line(frame_to_show, (cols - 1, righty), (0, lefty), (0, 255, 255), 8)
+                cv.circle(frame_to_show, pos, rasmus_the_radius, (255, 255, 255), thickness=-1)
+                #cv2.drawContours(frame_to_show, [cont], -1, (255, 255, 255), thickness=-1)
+                print("i cri")
+            except cv2.error as e:
+                print(e)
+                continue
+            except OverflowError:
                 continue
 
-    cue_frame = np.vstack(
-        [cv2.warpPerspective(img, M, (h, w)), cv2.cvtColor(diff, cv2.COLOR_GRAY2RGB)])
+    #cue_frame = np.vstack(
+    #    [cv2.warpPerspective(img, M, (h, w)), cv2.cvtColor(diff, cv2.COLOR_GRAY2RGB)])
 
 
 def img_producer():
     global producer_consumer_img_lock, producer_consumer_img, producer_consumer_img_count, finished
     cap = cv2.VideoCapture(2)
+    # cap = cv2.VideoCapture('test_images/tm2.mov')
     cap.set(cv.CAP_PROP_FRAME_WIDTH, 1920)
     cap.set(cv.CAP_PROP_FRAME_HEIGHT, 1080)
     cap.set(cv.CAP_PROP_FPS, 60)
@@ -226,13 +246,13 @@ def img_producer():
         ret, frame = cap.read()
 
         time_acc += t.time() - start
-        print(t.time() - start)
+        # print(t.time() - start)
         producer_consumer_img_lock.acquire()
         producer_consumer_img = frame
         producer_consumer_img_count += 1
-        print(time_acc / producer_consumer_img_count)
+        # print(time_acc / producer_consumer_img_count)
         producer_consumer_img_lock.release()
-
+        # t.sleep(0.033)
 
 
 def get_image(img_count):
@@ -255,30 +275,38 @@ def img_consumer():
     # Load calib values
     global fps, fps_acc, fps_avg, time, frame_to_show, reset_first_img, finished, pik, debug, width, height
     global producer_consumer_img_lock, producer_consumer_img, producer_consumer_img_count
+    global outer_M, outer_M_inv
+    global M, M_inv
+    global img2_outer, outer_wrapped
 
-    # cap = cv2.VideoCapture(1)
-    # src_points = calibrate_board_corners(cap)
-    # dst_points = np.float32([(0, 0), (width, 0), (width, height), (0, height)]).reshape(-1, 1, 2)
-    # M, mask = cv2.findHomography(np.float32(src_points).reshape(-1, 1, 2), dst_points, cv2.RANSAC, 5.0)
+    outer_src_points = calibrate_board_corners()
+    outer_dst_points = np.float32([(0, 0), (width, 0), (width, height), (0, height)]).reshape(-1, 1, 2)
+    outer_M, mask = cv2.findHomography(np.float32(outer_src_points).reshape(-1, 1, 2), outer_dst_points, cv2.RANSAC,
+                                       5.0)
+    outer_M_inv = np.linalg.inv(outer_M)
     src_points, dst_points = calibrate_projector()
     M, mask = cv2.findHomography(src_points, dst_points, cv2.RANSAC, 5.0)
+    M_inv = np.linalg.inv(M)
     reset_first_img = True
     frame, frame_count = get_image(0)
     img2 = frame
     frame_to_show = frame
     img2 = cv2.warpPerspective(img2, M, (width, height))
+    # img2_outer = cv2.warpPerspective(frame_to_show, outer_M, (1024,512))
     lastOutput = black_canvas = np.zeros((height, width, 3), np.uint8)
     time = t.time()
     while not finished:
         frame, frame_count = get_image(frame_count)
-
+        # outer_wrapped = cv2.warpPerspective(frame, outer_M, (1920, 1080))
         time_s = t.time()
         frame = cv2.warpPerspective(frame, M, (width, height))
         time_p1 = t.time()
         if reset_first_img:
             frame_to_show = np.zeros((height, width, 3), np.uint8)
+            frame_to_show[:, :] = (255, 255, 255)  # not so black now
             t.sleep(1)
             frame, frame_count = get_image(frame_count)
+            # img2_outer = cv2.warpPerspective(frame, outer_M, (1024, 512))
             frame = cv2.warpPerspective(frame, M, (width, height))
             img2 = frame
             reset_first_img = False
@@ -293,7 +321,7 @@ def img_consumer():
         fps_avg = int(fps_acc / (t.time() - start_t))
         time = t.time()
 
-        #print(fps_avg, fps, f"Time spent warping: {time_p1 - time_s}, Time spent on img: {t.time() - time_s}")
+        # print(fps_avg, fps, f"Time spent warping: {time_p1 - time_s}, Time spent on img: {t.time() - time_s}")
     finished = True
 
 
@@ -306,7 +334,7 @@ def calibrate_projector():
     global height, width, frame_to_show, debug_frame
     size = 100
     initial_offset = 50
-    buffer = 150
+    buffer = 120
     sleep_b = 0.4
     ids_to_find = [2, 3, 4, 5]
     aruco_images = [get_aruco(marker_id, size) for marker_id in ids_to_find]
@@ -472,11 +500,12 @@ def check_bounds(x, y, size, width, height):
     return True
 
 
-def calibrate_board_corners(cap):
+def calibrate_board_corners():
     cornerDict = {}
     src_points = []
+    frame_count = 0
     while len(src_points) < 4:
-        ret, frame = cap.read()
+        frame, frame_count = get_image(frame_count)
         (corners, ids, rejected) = cv2.aruco.detectMarkers(frame, arucoDict, parameters=arucoParams)
         for (markerCorner, id) in zip(corners, ids):
             if str(id) not in cornerDict:
@@ -559,14 +588,14 @@ create_entry("Max y-offset", offset_y_h_var, 7)
 create_entry("Threshold", threshold_var, 8)
 
 cv2.namedWindow("Window_Show")
-# cv2.moveWindow("Window_Show", 2048, 0)
+cv2.moveWindow("Window_Show", 2048, 0)
 # cv2.namedWindow("Debug_Window_Show")
 # cv2.moveWindow("Debug_Window_Show", 0, 0)
 
 while not finished:
     cv2.waitKey(1)
     cv.imshow('Window_Show', frame_to_show)
-    # cv.imshow("Debug_Window_Show", debug_frame)
-    # cv.imshow("Cue_window_show", cue_frame)
+    #cv.imshow("Debug_Window_Show", debug_frame)
+    #cv.imshow("Cue_window_show", cue_frame)
 
     top.update()
