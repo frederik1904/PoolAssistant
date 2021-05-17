@@ -4,6 +4,7 @@ import cv2
 import cv2 as cv
 import numpy as np
 import time as t
+import functools
 
 top = tk.Tk()
 fps = 0
@@ -50,6 +51,16 @@ threshold = 60
 threshold_var = tk.StringVar()
 threshold_var.set(str(threshold))
 
+que_sliding_window = [(0, 0), (0, 0), (0, 0), (0, 0), (0, 0), (0, 0), (0, 0), (0, 0), (0, 0), (0, 0)]
+que_sliding_window_index = 0
+que_sliding_window_avg = (0, 0)
+
+whiteball_sliding_window = [(0, 0), (0, 0), (0, 0), (0, 0), (0, 0), (0, 0), (0, 0), (0, 0), (0, 0), (0, 0)]
+whiteball_sliding_window_index = 0
+whiteball_sliding_window_avg = (0, 0)
+
+corner_points = [(0, 0), (width, 0), (width, height), (0, height)]
+
 arucoDict = cv2.aruco.Dictionary_get(cv2.aruco.DICT_6X6_1000)
 arucoParams = cv2.aruco.DetectorParameters_create()
 
@@ -93,7 +104,7 @@ def find_diff(img1, img2):
 
 
 def find_boxes_from_img(img, output, w, h, last_out):
-    global debug_frame, debug
+    global debug_frame, debug, whiteball_sliding_window, whiteball_sliding_window_index, whiteball_sliding_window_avg
     start_time = t.time()
     ret, thresh_gray = cv.threshold(cv.cvtColor(img, cv.COLOR_BGR2GRAY), threshold, 255, cv.THRESH_BINARY)
     tg_copy = thresh_gray.copy()
@@ -133,18 +144,28 @@ def find_boxes_from_img(img, output, w, h, last_out):
     # draw_magic_lines_of_helpiness()
     find_cue(output, tg_copy, pos, black_canvas, radius + 60)
     time_p3 = t.time()
-    black_canvas = cv.circle(black_canvas, pos, radius + 60, (0, 255, 255), 5)
-    # black_canvas = cv.putText(black_canvas, "FPS: " + str(fps) + ", AVG: " + str(fps_avg), (0, 500), cv2.FONT_HERSHEY_SIMPLEX,
-    # 3, (255, 255, 255))
-    # output = cv.putText(output, "FPS: " + str(fps) + ", AVG: " + str(fps_avg), (0, 500), cv2.FONT_HERSHEY_SIMPLEX,
-    #                    3, (255, 255, 255))
-    # backtorgb1 = cv2.cvtColor(thresh_gray, cv2.COLOR_GRAY2RGB)
-    # backtorgb = cv2.cvtColor(thresh_gray2, cv2.COLOR_GRAY2RGB)
-    # debug_frame = np.vstack([np.hstack([img, backtorgb1]), np.hstack([backtorgb, output])])
+    if whiteball_sliding_window_avg[0] - 0.5 < pos[0] < whiteball_sliding_window_avg[0] + 0.5 and \
+            whiteball_sliding_window_avg[1] - 0.5 < pos[1] < whiteball_sliding_window_avg[1] + 0.5:
+        black_canvas = cv.circle(black_canvas, whiteball_sliding_window_avg, radius + 60, (0, 255, 255), 5)
+    else:
+        black_canvas = cv.circle(black_canvas, pos, radius + 60, (0, 255, 255), 5)
+
+    whiteball_sliding_window[whiteball_sliding_window_index] = pos
+    whiteball_sliding_window_index = (whiteball_sliding_window_index + 1) % len(whiteball_sliding_window)
+    pos = functools.reduce(lambda a, b: (a[0] + b[0], a[1] + b[1]), whiteball_sliding_window)
+    whiteball_sliding_window_avg = (pos[0] // len(whiteball_sliding_window), pos[1] // len(whiteball_sliding_window))
+
+    black_canvas = cv.putText(black_canvas, "FPS: " + str(fps) + ", AVG: " + str(fps_avg), (0, 500),
+                              cv2.FONT_HERSHEY_SIMPLEX, 3, (255, 255, 255))
+    output = cv.putText(output, "FPS: " + str(fps) + ", AVG: " + str(fps_avg), (0, 500), cv2.FONT_HERSHEY_SIMPLEX, 3,
+                        (255, 255, 255))
+    backtorgb1 = cv2.cvtColor(thresh_gray, cv2.COLOR_GRAY2RGB)
+    backtorgb = cv2.cvtColor(thresh_gray2, cv2.COLOR_GRAY2RGB)
+    debug_frame = np.vstack([np.hstack([img, backtorgb1]), np.hstack([backtorgb, output])])
     time_p4 = t.time()
-    if time_p4 - start_time > 0.016:
-        print(
-            f"Time diff p1: {time_p1 - start_time}, p2: {time_p2 - time_p1}, p3: {time_p3 - time_p2}, p4: {time_p4 - time_p3}, total: {time_p4 - start_time}")
+    #if time_p4 - start_time > 0.016:
+        #print(
+        #    f"Time diff p1: {time_p1 - start_time}, p2: {time_p2 - time_p1}, p3: {time_p3 - time_p2}, p4: {time_p4 - time_p3}, total: {time_p4 - start_time}")
     if debug:
         return np.vstack([np.hstack([img, backtorgb1]), np.hstack([backtorgb, output])])
     else:
@@ -182,8 +203,8 @@ def find_avg_color(frame, diff):
     return maxLoc, radius
 
 
-def find_cue(img, diff, pos, frame_to_show,rasmus_the_radius):
-    global cue_frame
+def find_cue(img, diff, pos, frame_to_show, rasmus_the_radius):
+    global cue_frame, que_sliding_window, que_sliding_window_index, que_sliding_window_avg
     h, w = 200, 200
     x, y = pos
     dst_points = np.float32([(0, 0), (0, w), (h, w), (h, 0)]).reshape(-1, 1, 2)
@@ -194,9 +215,10 @@ def find_cue(img, diff, pos, frame_to_show,rasmus_the_radius):
     diff = cv2.warpPerspective(diff, M, (h, w))
 
     contours, _ = cv.findContours(diff, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-    found_cue = False
+    max_area, max_cont, max_x, max_y = None, None, None, None
     for cont in contours:
-        if cv2.contourArea(cont) < 100:
+        area = cv2.contourArea(cont)
+        if area < 100:
             cv2.fillPoly(diff, pts=[cont], color=0)
             continue
         (x, y), (we, he), angle = cv.minAreaRect(cont)
@@ -205,35 +227,123 @@ def find_cue(img, diff, pos, frame_to_show,rasmus_the_radius):
         aspect_ratio = max(we, he) / min(we, he)
         if aspect_ratio < 2:  # or w > 100 or h > 100:
             cv2.fillPoly(diff, pts=[cont], color=0)
-        else:  # This is the cue?
-            found_cue = True
-            try:
-                cont_to_fill = cont.copy()
-                cont = cv2.perspectiveTransform(np.float32(cont), M_back)
+        elif max_area == None or area > max_area:  # This is the cue?
+            max_x, max_y = x,y
+            max_area = area
+            max_cont = cont
 
-                rows, cols = frame_to_show.shape[:2]
-                [vx, vy, x, y] = cv.fitLine(cont, cv.DIST_L2, 0, 0.01, 0.01)
-                lefty = int((-x * vy / vx) + y)
-                righty = int(((cols - x) * vy / vx) + y)
+    if max_area is None:
+        return
 
-                cv.line(frame_to_show, (cols - 1, righty), (0, lefty), (0, 255, 255), 8)
-                cv.circle(frame_to_show, pos, rasmus_the_radius, (255, 255, 255), thickness=-1)
-                #cv2.drawContours(frame_to_show, [cont], -1, (255, 255, 255), thickness=-1)
-                print("i cri")
-            except cv2.error as e:
-                print(e)
-                continue
-            except OverflowError:
-                continue
+    try:
+        cont = cv2.perspectiveTransform(np.float32(max_cont), M_back)
 
-    #cue_frame = np.vstack(
+        rows, cols = frame_to_show.shape[:2]
+        [vx, vy, x, y] = cv.fitLine(cont, cv.DIST_L2, 0, 0.01, 0.01)
+        lefty = int((-x * vy / vx) + y)
+        righty = int(((cols - x) * vy / vx) + y)
+
+        if not (que_sliding_window_avg[0] - 0.5 < lefty < que_sliding_window_avg[0] + 0.5 and
+                que_sliding_window_avg[1] - 0.5 < righty < que_sliding_window_avg[1] + 0.5):
+            cv.line(frame_to_show, (cols - 1, righty), (0, lefty), (0, 255, 255), 8)
+            cv.circle(frame_to_show, pos, rasmus_the_radius, (255, 255, 255), thickness=-1)
+        else:
+            cv.line(frame_to_show, (cols - 1, que_sliding_window_avg[1]), (0, que_sliding_window_avg[0]), (0, 255, 255),
+                    8)
+            cv.circle(frame_to_show, pos, rasmus_the_radius, (255, 255, 255), thickness=-1)
+
+        dir = [0, 0]
+        if max_x > 100:
+            dir[0] = 1
+        else:
+            dir[0] = -1
+        if max_y > 100:
+            dir[1] = 1
+        else:
+            dir[1] = -1
+        draw_bounces(frame_to_show, [(cols - 1, righty), (0, lefty)], dir)
+        print("__________")
+        pos = (lefty, righty)
+        que_sliding_window[que_sliding_window_index] = pos
+        que_sliding_window_index = (que_sliding_window_index + 1) % len(que_sliding_window)
+        pos = functools.reduce(lambda a, b: (a[0] + b[0], a[1] + b[1]), que_sliding_window)
+        que_sliding_window_avg = (pos[0] // len(que_sliding_window), pos[1] // len(que_sliding_window))
+
+    except cv2.error as e:
+        pass
+    except OverflowError:
+        pass
+    # cue_frame = np.vstack(
     #    [cv2.warpPerspective(img, M, (h, w)), cv2.cvtColor(diff, cv2.COLOR_GRAY2RGB)])
+
+
+def draw_bounces(image, points, dir, bounces=3, last_p_index=None):
+    global corner_points
+    if bounces == 0:
+        return
+    current_line = line(points[0], points[1])
+    for p_index in range(len(corner_points)):
+        if p_index == last_p_index:
+            continue
+        p1 = corner_points[p_index]
+        p2 = corner_points[(p_index + 1) % len(corner_points)]
+        min_x = min(p1[0], p2[0])
+        max_x = max(p1[0], p2[0])
+        min_y = min(p1[1], p2[1])
+        max_y = max(p1[1], p2[1])
+        intersect = intersection(current_line, line(p1, p2))
+        new_dir = [dir[0], dir[1]]
+        if intersect and min_x <= intersect[0] <= max_x and min_y <= intersect[1] <= max_y:
+            pos1 = (int(intersect[0]), int(intersect[1]))
+            if p_index == 0 or p_index == 2:
+                new_dir[0] = -new_dir[0]
+                pos2 = (int(points[1][0]), -int(points[1][1]))
+                lines = [pos1, pos2]
+                if dir[0] == 1 and p_index == 2:
+                    draw_line_and_impact(image, pos1, pos2)
+                    draw_bounces(image, lines, dir=new_dir, bounces=bounces - 1, last_p_index=p_index)
+                elif dir[0] == -1 and p_index == 0:
+                    draw_line_and_impact(image, pos1, pos2)
+                    draw_bounces(image, lines, dir=new_dir, bounces=bounces - 1, last_p_index=p_index)
+            else:
+                new_dir[1] = -new_dir[1]
+                pos2 = (-int(points[1][0]), int(points[1][1]))
+                lines = [pos1, pos2]
+                if dir[1] == 1 and p_index == 1:
+                    draw_line_and_impact(image, pos1, pos2)
+                    draw_bounces(image, lines, dir=new_dir, bounces=bounces - 1, last_p_index=p_index)
+                elif dir[1] == -1 and p_index == 3:
+                    draw_line_and_impact(image, pos1, pos2)
+                    draw_bounces(image, lines, dir=new_dir, bounces=bounces - 1, last_p_index=p_index)
+
+
+def draw_line_and_impact(image, pos1, pos2):
+    cv2.line(image, pos1, pos2, (255, 0, 0), 8)
+    cv2.circle(image, pos1, 15, (255, 0, 0), -1)
+
+
+def line(p1, p2):
+    A = (p1[1] - p2[1])
+    B = (p2[0] - p1[0])
+    C = (p1[0]*p2[1] - p2[0]*p1[1])
+    return A, B, -C
+
+def intersection(L1, L2):
+    D  = L1[0] * L2[1] - L1[1] * L2[0]
+    Dx = L1[2] * L2[1] - L1[1] * L2[2]
+    Dy = L1[0] * L2[2] - L1[2] * L2[0]
+    if D != 0:
+        x = Dx / D
+        y = Dy / D
+        return x,y
+    else:
+        return False
 
 
 def img_producer():
     global producer_consumer_img_lock, producer_consumer_img, producer_consumer_img_count, finished
-    cap = cv2.VideoCapture(2)
-    # cap = cv2.VideoCapture('test_images/tm2.mov')
+    # cap = cv2.VideoCapture(2)
+    cap = cv2.VideoCapture('test_images/tm2.mov')
     cap.set(cv.CAP_PROP_FRAME_WIDTH, 1920)
     cap.set(cv.CAP_PROP_FRAME_HEIGHT, 1080)
     cap.set(cv.CAP_PROP_FPS, 60)
@@ -252,7 +362,7 @@ def img_producer():
         producer_consumer_img_count += 1
         # print(time_acc / producer_consumer_img_count)
         producer_consumer_img_lock.release()
-        # t.sleep(0.033)
+        t.sleep(0.035)
 
 
 def get_image(img_count):
@@ -279,19 +389,23 @@ def img_consumer():
     global M, M_inv
     global img2_outer, outer_wrapped
 
-    outer_src_points = calibrate_board_corners()
-    outer_dst_points = np.float32([(0, 0), (width, 0), (width, height), (0, height)]).reshape(-1, 1, 2)
-    outer_M, mask = cv2.findHomography(np.float32(outer_src_points).reshape(-1, 1, 2), outer_dst_points, cv2.RANSAC,
-                                       5.0)
-    outer_M_inv = np.linalg.inv(outer_M)
+    # outer_src_points = calibrate_board_corners()
+    # outer_dst_points = np.float32([(0, 0), (width, 0), (width, height), (0, height)]).reshape(-1, 1, 2)
+    # outer_M, mask = cv2.findHomography(np.float32(outer_src_points).reshape(-1, 1, 2), outer_dst_points, cv2.RANSAC,
+    #                                   5.0)
+    # outer_M_inv = np.linalg.inv(outer_M)
+
     src_points, dst_points = calibrate_projector()
     M, mask = cv2.findHomography(src_points, dst_points, cv2.RANSAC, 5.0)
     M_inv = np.linalg.inv(M)
-    reset_first_img = True
+    # reset_first_img = True
     frame, frame_count = get_image(0)
     img2 = frame
     frame_to_show = frame
     img2 = cv2.warpPerspective(img2, M, (width, height))
+
+    calibrate_corners(img2)
+
     # img2_outer = cv2.warpPerspective(frame_to_show, outer_M, (1024,512))
     lastOutput = black_canvas = np.zeros((height, width, 3), np.uint8)
     time = t.time()
@@ -356,70 +470,6 @@ def calibrate_projector():
         img_to_show = insert_marker_on_img(aruco_images[index], img_to_show, markers[index][0], size)
     frame_to_show = img_to_show
     t.sleep(sleep_b)
-    # while not all([i[1] == 0 and i[2] == 0 for i in markers]):
-    #     img_to_show = np.zeros((height, width, 3), np.uint8)
-    #     img_to_show[:, :] = (255, 255, 255)  # make image white
-    #     for index in range(len(markers)):
-    #         img_to_show = insert_marker_on_img(aruco_images[index], img_to_show, markers[index][0], size)
-    #     frame_to_show = img_to_show
-    #     t.sleep(sleep_b)
-    #     ret, frame = cap.read()
-    #     # frame = cv.warpPerspective(frame, homography_m, (width, height))
-    #     debug_frame = frame
-    #     (corners, ids, rejected) = cv2.aruco.detectMarkers(frame, arucoDict, parameters=arucoParams)
-    #
-    #     for marker_id in ids_to_find:
-    #         marker_t = markers[marker_id - 2]
-    #         new_touple = marker_t[0]
-    #         if ids is not None and marker_id in ids:
-    #             if marker_t[1] != 0:  # Checks that x is still being calibrated
-    #                 if marker_t[3]:  # Checks whether we just came from out of bounds
-    #                     marker_t[1] //= 2
-    #                     marker_t[1] *= -1
-    #                     marker_t[3] = False
-    #                 new_touple = (marker_t[1] + marker_t[0][0], marker_t[0][1])
-    #                 if not check_bounds(new_touple[1], new_touple[0], size, width, height) or marker_t[
-    #                     1] == 0:  # checks the bounds (duh) or Checks if we are about to change to calibrating the y-axis
-    #                     new_touple = insert_buffer(marker_t[0], marker_id, buffer)
-    #                     marker_t[1] = 0
-    #                     marker_t[2] *= initial_offset
-    #                     marker_t[3] = False
-    #             elif marker_t[2] != 0:  # Checks that y is still being calibrated
-    #                 if marker_t[3]:  # Checks whether we just came from out of bounds
-    #                     marker_t[2] //= 2
-    #                     marker_t[2] *= -1
-    #                     marker_t[3] = False
-    #                 new_touple = (marker_t[0][0], marker_t[0][1] + marker_t[2])
-    #                 if not check_bounds(new_touple[1], new_touple[0], size, width, height) or marker_t[
-    #                     2] == 0:  # Checks if we are about to change to calibrating the y-axis
-    #                     new_touple = insert_buffer(marker_t[0], marker_id, buffer, dir=1)
-    #                     marker_t[2] = 0
-    #                     marker_t[3] = False
-    #         else:  # Marker cant be seen by camera
-    #             if marker_t[1] != 0:  # Checks that x is still being calibrated
-    #                 if not marker_t[3]:  # Checks whether we just came from out of bounds
-    #                     marker_t[1] //= 2
-    #                     marker_t[1] *= -1
-    #                     marker_t[3] = True
-    #                 new_touple = (marker_t[1] + marker_t[0][0], marker_t[0][1])
-    #                 if not check_bounds(new_touple[1], new_touple[0], size, width, height) or marker_t[
-    #                     1] == 0:  # Checks if we are about to change to calibrating the y-axis or checks the bounds (duh)
-    #                     new_touple = insert_buffer(marker_t[0], marker_id, buffer)
-    #                     marker_t[1] = 0
-    #                     marker_t[2] *= initial_offset
-    #                     marker_t[3] = True
-    #             elif marker_t[2] != 0:  # Checks that y is still being calibrated
-    #                 if not marker_t[3]:  # Checks whether we just came from out of bounds
-    #                     marker_t[2] //= 2
-    #                     marker_t[2] *= -1
-    #                     marker_t[3] = True
-    #                 new_touple = (marker_t[0][0], marker_t[0][1] + marker_t[2])
-    #                 if not check_bounds(new_touple[1], new_touple[0], size, width, height) or marker_t[
-    #                     2] == 0:  # Checks if we are about to change to calibrating the y-axis
-    #                     new_touple = insert_buffer(marker_t[0], marker_id, buffer, dir=1)
-    #                     marker_t[2] = 0
-    #                     marker_t[3] = True
-    #         marker_t[0] = new_touple
 
     src_points = []
     dst_points = []
@@ -464,14 +514,18 @@ def calibrate_projector():
     src_points = [item[0] for item in src_points]
     dst_points = [item[0] for item in dst_points]
 
-    # src_points.append(src_points.pop(1))
-    # src_points.append(src_points.pop(1))
-    # src_points.append(src_points.pop(1))
-
-    # dst_points.append(dst_points.pop(2))
-    # dst_points.append(dst_points.pop(1))
-
     return np.float32(src_points).reshape(-1, 1, 2), np.float32(dst_points).reshape(-1, 1, 2)
+
+
+def calibrate_corners(frame):
+    global frame_to_show, corner_points
+
+    frame_to_show = frame
+
+    for corner in corner_points:
+        cv2.circle(frame, corner, 10, (255, 0, 0), -1)
+
+    # Do something impressive here
 
 
 def insert_buffer(touple, id, buffer, dir=0):
@@ -587,15 +641,15 @@ create_entry("Min y-offset", offset_y_l_var, 6)
 create_entry("Max y-offset", offset_y_h_var, 7)
 create_entry("Threshold", threshold_var, 8)
 
-cv2.namedWindow("Window_Show")
-cv2.moveWindow("Window_Show", 2048, 0)
+# cv2.namedWindow("Window_Show")
+# cv2.moveWindow("Window_Show", 2048, 0)
 # cv2.namedWindow("Debug_Window_Show")
 # cv2.moveWindow("Debug_Window_Show", 0, 0)
 
 while not finished:
     cv2.waitKey(1)
     cv.imshow('Window_Show', frame_to_show)
-    #cv.imshow("Debug_Window_Show", debug_frame)
-    #cv.imshow("Cue_window_show", cue_frame)
+    cv.imshow("Debug_Window_Show", debug_frame)
+    # cv.imshow("Cue_window_show", cue_frame)
 
     top.update()
