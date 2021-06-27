@@ -67,28 +67,28 @@ shit_v_sliding_window = [(0, 0) for _ in range(5)]
 shit_v_sliding_window_index = 0
 shit_v_sliding_window_avg = (0, 0)
 
-x_1 = 0
+x_1 = -70
 x_1_var = tk.StringVar()
 x_1_var.set(x_1)
-y_1 = 7
+y_1 = 79
 y_1_var = tk.StringVar()
 y_1_var.set(y_1)
-x_2 = width
+x_2 = 1260
 x_2_var = tk.StringVar()
 x_2_var.set(x_2)
-y_2 = 7
+y_2 = 71
 y_2_var = tk.StringVar()
 y_2_var.set(y_2)
-x_3 = width
+x_3 = 1256
 x_3_var = tk.StringVar()
 x_3_var.set(x_3)
-y_3 = 667
+y_3 = 726
 y_3_var = tk.StringVar()
 y_3_var.set(y_3)
-x_4 = 0
+x_4 = -60
 x_4_var = tk.StringVar()
 x_4_var.set(x_4)
-y_4 = 670
+y_4 = 734
 y_4_var = tk.StringVar()
 y_4_var.set(y_4)
 
@@ -96,6 +96,11 @@ calibrating = False
 calibrating_var = tk.BooleanVar()
 calibrating_var.set(calibrating)
 corner_points = [(x_1, y_1), (x_2, y_2), (x_3, y_3), (x_4, y_4)]
+
+give_help = True
+give_help_var = tk.BooleanVar()
+give_help_var.set(give_help)
+
 
 arucoDict = cv2.aruco.Dictionary_get(cv2.aruco.DICT_6X6_1000)
 arucoParams = cv2.aruco.DetectorParameters_create()
@@ -148,6 +153,9 @@ def find_boxes_from_img(img, output, w, h, last_out):
     contours, hier = cv.findContours(thresh_gray, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
     black_canvas = np.zeros((h, w, 3), np.uint8)
     black_canvas[:, :] = (255, 255, 255)  # not so black now
+    if not give_help:
+        return black_canvas
+
     for cont in contours:
         area = cv.contourArea(cont)
 
@@ -188,13 +196,13 @@ def find_boxes_from_img(img, output, w, h, last_out):
 
     black_canvas = cv.circle(black_canvas, whiteball_sliding_window_avg, radius + 60, (0, 255, 255), 5)
 
-    black_canvas = cv.putText(black_canvas, "FPS: " + str(fps) + ", AVG: " + str(fps_avg), (0, 500),
-                              cv2.FONT_HERSHEY_SIMPLEX, 3, (255, 255, 255))
-    output = cv.putText(output, "FPS: " + str(fps) + ", AVG: " + str(fps_avg), (0, 500), cv2.FONT_HERSHEY_SIMPLEX, 3,
-                        (255, 255, 255))
-    backtorgb1 = cv2.cvtColor(thresh_gray, cv2.COLOR_GRAY2RGB)
-    backtorgb = cv2.cvtColor(thresh_gray2, cv2.COLOR_GRAY2RGB)
-    debug_frame = np.vstack([np.hstack([img, backtorgb1]), np.hstack([backtorgb, output])])
+    #black_canvas = cv.putText(black_canvas, "FPS: " + str(fps) + ", AVG: " + str(fps_avg), (0, 500),
+    #                          cv2.FONT_HERSHEY_SIMPLEX, 3, (255, 255, 255))
+    #output = cv.putText(output, "FPS: " + str(fps) + ", AVG: " + str(fps_avg), (0, 500), cv2.FONT_HERSHEY_SIMPLEX, 3,
+    #                    (255, 255, 255))
+    # backtorgb1 = cv2.cvtColor(thresh_gray, cv2.COLOR_GRAY2RGB)
+    # backtorgb = cv2.cvtColor(thresh_gray2, cv2.COLOR_GRAY2RGB)
+    #debug_frame = np.vstack([np.hstack([img, backtorgb1]), np.hstack([backtorgb, output])])
     time_p4 = t.time()
     # if time_p4 - start_time > 0.016:
     # print(
@@ -326,7 +334,7 @@ def find_cue(img, diff, pos, frame_to_show, rasmus_the_radius):
        [n_img, cv2.cvtColor(diff, cv2.COLOR_GRAY2RGB)])
 
 
-def draw_bounces(image, points, dir, bounces=5, last_p_index=None):
+def draw_bounces(image, points, dir, bounces=3, last_p_index=None):
     global corner_points
     if bounces == 0:
         return []
@@ -409,7 +417,7 @@ def intersection(L1, L2):
 
 def img_producer():
     global producer_consumer_img_lock, producer_consumer_img, producer_consumer_img_count, finished
-    cap = cv2.VideoCapture(3)
+    cap = cv2.VideoCapture(2)
     # cap = cv2.VideoCapture('test_images/tm2.mov')
     cap.set(cv.CAP_PROP_FRAME_WIDTH, 1920)
     cap.set(cv.CAP_PROP_FRAME_HEIGHT, 1080)
@@ -513,9 +521,10 @@ def insert_marker_on_img(marker, img, cord, size):
 
 def calibrate_projector():
     global height, width, frame_to_show, debug_frame
+    print("I AM HERE")
     size = 100
     initial_offset = 50
-    buffer = 120
+    buffer = 10
     sleep_b = 0.4
     ids_to_find = [2, 3, 4, 5]
     aruco_images = [get_aruco(marker_id, size) for marker_id in ids_to_find]
@@ -549,7 +558,7 @@ def calibrate_projector():
             t.sleep(.5)
             continue
         correct_ids = [mark_id for mark_id in ids if mark_id in ids_to_find]
-
+        print(ids)
         if len(correct_ids) < 4:
             print("Didnt find all that i wanted trying again")
             t.sleep(.5)
@@ -593,7 +602,7 @@ def calibrate_corners():
         for i in range(len(corner_points)):
             p1 = corner_points[i]
             p2 = corner_points[(i + 1) % len(corner_points)]
-            cv2.line(frame, p1, p2, (255, 255, 255), thickness=8)
+            cv2.line(frame, p1, p2, (255, 255, 255), thickness=1)
         frame_to_show = frame
 
     # Do something impressive here
@@ -686,6 +695,7 @@ def submit():
     global x_4, x_4_var
     global y_4, y_4_var
     global calibrating, calibrating_var
+    global give_help, give_help_var
 
     morph_size = int(morph_size_var.get())
     threshold_area = int(threshold_area_var.get())
@@ -704,6 +714,7 @@ def submit():
     x_4 = int(x_4_var.get())
     y_4 = int(y_4_var.get())
     calibrating = bool(calibrating_var.get())
+    give_help = bool(give_help_var.get())
 
 
 def create_entry(text, variable, row):
@@ -740,6 +751,7 @@ create_entry("Y3", y_3_var, 14)
 create_entry("X4", x_4_var, 15)
 create_entry("Y4", y_4_var, 16)
 create_entry("CALIBRATING", calibrating_var, 17)
+create_entry("Give aids?", give_help_var, 18)
 
 cv2.namedWindow("Window_Show")
 cv2.moveWindow("Window_Show", 2048, 0)
@@ -750,7 +762,7 @@ while not finished:
     cv2.waitKey(1)
     cv.imshow('Window_Show', frame_to_show)
     # frame, _ = get_image(0)
-    #cv.imshow("Debug_Window_Show", debug_frame)
+    # cv.imshow("Debug_Window_Show", debug_frame)
     #cv.imshow("Cue_window_show", cue_frame)
 
     top.update()
